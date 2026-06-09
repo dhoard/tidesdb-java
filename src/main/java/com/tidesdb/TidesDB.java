@@ -87,7 +87,8 @@ public class TidesDB implements Closeable {
             osc != null ? osc.isReplicaMode() : false,
             osc != null ? osc.getReplicaSyncIntervalUs() : 5000000,
             osc != null ? osc.isReplicaReplayWal() : true,
-            config.getMaxConcurrentFlushes()
+            config.getMaxConcurrentFlushes(),
+            config.isFinishCompactionsOnClose()
         );
 
         return new TidesDB(handle);
@@ -361,7 +362,40 @@ public class TidesDB implements Closeable {
         checkNotClosed();
         return nativeGetDbStats(nativeHandle);
     }
-    
+
+    /**
+     * Cancels background compaction database-wide. In-flight merges bail safely at their
+     * next checkpoint (their uncommitted output is discarded, inputs are left intact, so no
+     * data is lost) and any queued compaction is skipped. Flushes are unaffected, so
+     * durability is preserved. Blocks (bounded) until compaction is idle.
+     *
+     * <p>The cancellation is sticky for the session and is reset on the next open. It is
+     * intended to be called immediately before {@link #close()} for a fast shutdown.</p>
+     *
+     * @throws TidesDBException if the operation fails
+     */
+    public void cancelBackgroundWork() throws TidesDBException {
+        checkNotClosed();
+        nativeCancelBackgroundWork(nativeHandle);
+    }
+
+    /**
+     * Raises this process's open-file ceiling toward {@code desired} descriptors so a database
+     * can keep more SSTables open. The engine sizes {@code maxOpenSSTables} to fit this at open
+     * time, so call it <strong>before</strong> {@link #open(Config)}. This is an explicit, opt-in
+     * operator action; TidesDB never raises the limit itself.
+     *
+     * <p>On POSIX systems (Linux, macOS, the BSDs, illumos) this raises the {@code RLIMIT_NOFILE}
+     * soft limit toward the hard limit; on Windows it raises the CRT stdio cap (max 8192). A
+     * failed or partial raise is non-fatal.</p>
+     *
+     * @param desired target descriptor count; values &le; 0 just report the current ceiling
+     * @return the open-file ceiling in effect after the attempt
+     */
+    public static long raiseOpenFileLimit(long desired) {
+        return nativeRaiseOpenFileLimit(desired);
+    }
+
     private void checkNotClosed() {
         if (closed) {
             throw new IllegalStateException("TidesDB instance is closed");
@@ -391,7 +425,8 @@ public class TidesDB implements Closeable {
                                           boolean oscWalSyncOnCommit, boolean oscReplicaMode,
                                           long oscReplicaSyncIntervalUs,
                                           boolean oscReplicaReplayWal,
-                                          int maxConcurrentFlushes) throws TidesDBException;
+                                          int maxConcurrentFlushes,
+                                          boolean finishCompactionsOnClose) throws TidesDBException;
     
     private static native void nativeClose(long handle);
     
@@ -436,4 +471,8 @@ public class TidesDB implements Closeable {
     private static native void nativeDeleteColumnFamily(long handle, long cfHandle) throws TidesDBException;
 
     private static native void nativePromoteToPrimary(long handle) throws TidesDBException;
+
+    private static native void nativeCancelBackgroundWork(long handle) throws TidesDBException;
+
+    private static native long nativeRaiseOpenFileLimit(long desired);
 }

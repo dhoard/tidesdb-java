@@ -54,6 +54,14 @@ public class DbStats {
     private final long totalUploads;
     private final long totalUploadFailures;
     private final boolean replicaMode;
+    private final long uwalBytesWritten;
+    private final long walBytesWritten;
+    private final long flushBytesWritten;
+    private final long compactionBytesWritten;
+    private final long compactionBytesRead;
+    private final long userBytesWritten;
+    private final long flushCount;
+    private final long compactionCount;
 
     public DbStats(int numColumnFamilies, long totalMemory, long availableMemory,
                    long resolvedMemoryLimit, int memoryPressureLevel, int flushPendingCount,
@@ -66,7 +74,10 @@ public class DbStats {
                    boolean objectStoreEnabled, String objectStoreConnector,
                    long localCacheBytesUsed, long localCacheBytesMax, int localCacheNumFiles,
                    long lastUploadedGeneration, long uploadQueueDepth,
-                   long totalUploads, long totalUploadFailures, boolean replicaMode) {
+                   long totalUploads, long totalUploadFailures, boolean replicaMode,
+                   long uwalBytesWritten, long walBytesWritten, long flushBytesWritten,
+                   long compactionBytesWritten, long compactionBytesRead, long userBytesWritten,
+                   long flushCount, long compactionCount) {
         this.numColumnFamilies = numColumnFamilies;
         this.totalMemory = totalMemory;
         this.availableMemory = availableMemory;
@@ -98,6 +109,14 @@ public class DbStats {
         this.totalUploads = totalUploads;
         this.totalUploadFailures = totalUploadFailures;
         this.replicaMode = replicaMode;
+        this.uwalBytesWritten = uwalBytesWritten;
+        this.walBytesWritten = walBytesWritten;
+        this.flushBytesWritten = flushBytesWritten;
+        this.compactionBytesWritten = compactionBytesWritten;
+        this.compactionBytesRead = compactionBytesRead;
+        this.userBytesWritten = userBytesWritten;
+        this.flushCount = flushCount;
+        this.compactionCount = compactionCount;
     }
 
     public int getNumColumnFamilies() {
@@ -224,6 +243,84 @@ public class DbStats {
         return replicaMode;
     }
 
+    /**
+     * Gets the framed bytes appended to the shared unified WAL (lifetime since open).
+     * Returns 0 when unified memtable mode is off.
+     *
+     * @return unified WAL bytes written
+     */
+    public long getUwalBytesWritten() {
+        return uwalBytesWritten;
+    }
+
+    /**
+     * Gets the per-column-family WAL bytes summed across all column families
+     * (lifetime since open).
+     *
+     * @return WAL bytes written across all CFs
+     */
+    public long getWalBytesWritten() {
+        return walBytesWritten;
+    }
+
+    /**
+     * Gets the flush output bytes summed across all column families (lifetime since open).
+     *
+     * @return flush output bytes written across all CFs
+     */
+    public long getFlushBytesWritten() {
+        return flushBytesWritten;
+    }
+
+    /**
+     * Gets the compaction output bytes summed across all column families (lifetime since open).
+     *
+     * @return compaction output bytes written across all CFs
+     */
+    public long getCompactionBytesWritten() {
+        return compactionBytesWritten;
+    }
+
+    /**
+     * Gets the compaction input bytes summed across all column families (lifetime since open).
+     *
+     * @return compaction input bytes read across all CFs
+     */
+    public long getCompactionBytesRead() {
+        return compactionBytesRead;
+    }
+
+    /**
+     * Gets the logical committed bytes summed across all column families (lifetime since open).
+     * This is the database-wide write-amplification denominator:
+     * {@code (uwal + wal + flush + compaction) / userBytesWritten}.
+     *
+     * @return user bytes written across all CFs
+     */
+    public long getUserBytesWritten() {
+        return userBytesWritten;
+    }
+
+    /**
+     * Gets the number of flushed SSTables summed across all column families
+     * (lifetime since open).
+     *
+     * @return flush count across all CFs
+     */
+    public long getFlushCount() {
+        return flushCount;
+    }
+
+    /**
+     * Gets the number of compaction output SSTables summed across all column families
+     * (lifetime since open).
+     *
+     * @return compaction count across all CFs
+     */
+    public long getCompactionCount() {
+        return compactionCount;
+    }
+
     @Override
     public String toString() {
         return "DbStats{" +
@@ -258,6 +355,14 @@ public class DbStats {
             ", totalUploads=" + totalUploads +
             ", totalUploadFailures=" + totalUploadFailures +
             ", replicaMode=" + replicaMode +
+            ", uwalBytesWritten=" + uwalBytesWritten +
+            ", walBytesWritten=" + walBytesWritten +
+            ", flushBytesWritten=" + flushBytesWritten +
+            ", compactionBytesWritten=" + compactionBytesWritten +
+            ", compactionBytesRead=" + compactionBytesRead +
+            ", userBytesWritten=" + userBytesWritten +
+            ", flushCount=" + flushCount +
+            ", compactionCount=" + compactionCount +
             '}';
     }
 }

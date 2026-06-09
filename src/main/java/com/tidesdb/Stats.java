@@ -44,6 +44,13 @@ public class Stats {
     private final long[] levelTombstoneCounts;
     private final double maxSstDensity;
     private final int maxSstDensityLevel;
+    private final long walBytesWritten;
+    private final long flushBytesWritten;
+    private final long compactionBytesWritten;
+    private final long compactionBytesRead;
+    private final long userBytesWritten;
+    private final long flushCount;
+    private final long compactionCount;
 
     public Stats(int numLevels, long memtableSize, long[] levelSizes, int[] levelNumSSTables,
                  ColumnFamilyConfig config, long totalKeys, long totalDataSize,
@@ -51,7 +58,10 @@ public class Stats {
                  double readAmp, double hitRate, boolean useBtree, long btreeTotalNodes,
                  int btreeMaxHeight, double btreeAvgHeight,
                  long totalTombstones, double tombstoneRatio, long[] levelTombstoneCounts,
-                 double maxSstDensity, int maxSstDensityLevel) {
+                 double maxSstDensity, int maxSstDensityLevel,
+                 long walBytesWritten, long flushBytesWritten, long compactionBytesWritten,
+                 long compactionBytesRead, long userBytesWritten, long flushCount,
+                 long compactionCount) {
         this.numLevels = numLevels;
         this.memtableSize = memtableSize;
         this.levelSizes = levelSizes;
@@ -73,6 +83,13 @@ public class Stats {
         this.levelTombstoneCounts = levelTombstoneCounts;
         this.maxSstDensity = maxSstDensity;
         this.maxSstDensityLevel = maxSstDensityLevel;
+        this.walBytesWritten = walBytesWritten;
+        this.flushBytesWritten = flushBytesWritten;
+        this.compactionBytesWritten = compactionBytesWritten;
+        this.compactionBytesRead = compactionBytesRead;
+        this.userBytesWritten = userBytesWritten;
+        this.flushCount = flushCount;
+        this.compactionCount = compactionCount;
     }
 
     /**
@@ -271,6 +288,76 @@ public class Stats {
         return maxSstDensityLevel;
     }
 
+    /**
+     * Gets the framed bytes appended to this column family's WAL (lifetime since open).
+     * Always 0 in unified memtable mode, where the shared WAL volume is reported db-wide
+     * via {@link DbStats#getUwalBytesWritten()}.
+     *
+     * @return WAL bytes written
+     */
+    public long getWalBytesWritten() {
+        return walBytesWritten;
+    }
+
+    /**
+     * Gets the on-disk bytes this column family's flushes wrote to L0 SSTables
+     * (lifetime since open).
+     *
+     * @return flush output bytes written
+     */
+    public long getFlushBytesWritten() {
+        return flushBytesWritten;
+    }
+
+    /**
+     * Gets the on-disk bytes this column family's compactions wrote (lifetime since open).
+     *
+     * @return compaction output bytes written
+     */
+    public long getCompactionBytesWritten() {
+        return compactionBytesWritten;
+    }
+
+    /**
+     * Gets the on-disk bytes this column family's compactions read as input
+     * (lifetime since open).
+     *
+     * @return compaction input bytes read
+     */
+    public long getCompactionBytesRead() {
+        return compactionBytesRead;
+    }
+
+    /**
+     * Gets the logical key+value bytes committed to this column family (lifetime since open).
+     * This is the write-amplification denominator: divide the WAL, flush, and compaction
+     * write totals by this value to compute write amplification.
+     *
+     * @return user bytes written
+     */
+    public long getUserBytesWritten() {
+        return userBytesWritten;
+    }
+
+    /**
+     * Gets the number of flushed SSTables produced by this column family (lifetime since open).
+     *
+     * @return flush count
+     */
+    public long getFlushCount() {
+        return flushCount;
+    }
+
+    /**
+     * Gets the number of compaction output SSTables produced by this column family
+     * (lifetime since open).
+     *
+     * @return compaction count
+     */
+    public long getCompactionCount() {
+        return compactionCount;
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
@@ -292,6 +379,13 @@ public class Stats {
         sb.append(", tombstoneRatio=").append(tombstoneRatio);
         sb.append(", maxSstDensity=").append(maxSstDensity);
         sb.append(", maxSstDensityLevel=").append(maxSstDensityLevel);
+        sb.append(", walBytesWritten=").append(walBytesWritten);
+        sb.append(", flushBytesWritten=").append(flushBytesWritten);
+        sb.append(", compactionBytesWritten=").append(compactionBytesWritten);
+        sb.append(", compactionBytesRead=").append(compactionBytesRead);
+        sb.append(", userBytesWritten=").append(userBytesWritten);
+        sb.append(", flushCount=").append(flushCount);
+        sb.append(", compactionCount=").append(compactionCount);
         if (levelSizes != null) {
             sb.append(", levelSizes=[");
             for (int i = 0; i < levelSizes.length; i++) {

@@ -45,6 +45,7 @@ public class Config {
     private String objectStoreFsPath;
     private ObjectStoreConfig objectStoreConfig;
     private int maxConcurrentFlushes;
+    private boolean finishCompactionsOnClose;
 
     private Config(Builder builder) {
         this.dbPath = builder.dbPath;
@@ -65,6 +66,7 @@ public class Config {
         this.objectStoreFsPath = builder.objectStoreFsPath;
         this.objectStoreConfig = builder.objectStoreConfig;
         this.maxConcurrentFlushes = builder.maxConcurrentFlushes;
+        this.finishCompactionsOnClose = builder.finishCompactionsOnClose;
     }
 
     /**
@@ -173,6 +175,16 @@ public class Config {
     }
 
     /**
+     * Returns the close behavior for in-flight compactions.
+     *
+     * @return true if {@code close()} waits for in-flight compactions to finish;
+     *         false (default) cancels them at their next checkpoint for a fast shutdown
+     */
+    public boolean isFinishCompactionsOnClose() {
+        return finishCompactionsOnClose;
+    }
+
+    /**
      * Builder for Config.
      */
     public static class Builder {
@@ -194,6 +206,7 @@ public class Config {
         private String objectStoreFsPath = null;
         private ObjectStoreConfig objectStoreConfig = null;
         private int maxConcurrentFlushes = 0;
+        private boolean finishCompactionsOnClose = false;
 
         public Builder dbPath(String dbPath) {
             this.dbPath = dbPath;
@@ -282,6 +295,20 @@ public class Config {
 
         public Builder maxConcurrentFlushes(int maxConcurrentFlushes) {
             this.maxConcurrentFlushes = maxConcurrentFlushes;
+            return this;
+        }
+
+        /**
+         * Sets the close behavior for in-flight compactions.
+         *
+         * @param finishCompactionsOnClose false (default) cancels in-flight compactions at their
+         *        next checkpoint for a fast shutdown (no data is lost; recovery handles a mid-merge
+         *        state). true lets in-flight compactions run to completion before {@code close()}
+         *        returns.
+         * @return this builder
+         */
+        public Builder finishCompactionsOnClose(boolean finishCompactionsOnClose) {
+            this.finishCompactionsOnClose = finishCompactionsOnClose;
             return this;
         }
 

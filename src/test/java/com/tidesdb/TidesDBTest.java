@@ -1734,10 +1734,12 @@ public class TidesDBTest {
             cf.flushMemtable();
         }
 
-        // defaultConfig() should source maxConcurrentFlushes from the C library
+        // defaultConfig() should source maxConcurrentFlushes from the C library. The engine's
+        // default is 0, which is the "auto" sentinel meaning "pin to the resolved
+        // num_flush_threads" -- so the only invariant we can assert is that it is non-negative.
         Config defaults = Config.defaultConfig();
-        assertTrue(defaults.getMaxConcurrentFlushes() > 0,
-            "default maxConcurrentFlushes should be non-zero (sourced from tidesdb_default_config())");
+        assertTrue(defaults.getMaxConcurrentFlushes() >= 0,
+            "default maxConcurrentFlushes should be sourced from tidesdb_default_config()");
     }
 
     @Test
@@ -1765,6 +1767,192 @@ public class TidesDBTest {
                 assertThrows(IllegalArgumentException.class,
                     () -> txn.singleDelete(cf, new byte[0]));
             }
+        }
+    }
+
+    @Test
+    @Order(48)
+    void testRaiseOpenFileLimit() {
+        // Reporting-only call (desired <= 0) returns the current ceiling without changing it.
+        long current = TidesDB.raiseOpenFileLimit(0);
+        assertTrue(current > 0, "current open-file ceiling should be positive");
+
+        // A raise attempt is non-fatal and returns the ceiling in effect afterwards (>= current).
+        long after = TidesDB.raiseOpenFileLimit(current);
+        assertTrue(after >= current, "ceiling after a raise attempt should not be lower");
+    }
+
+    @Test
+    @Order(49)
+    void testCancelBackgroundWork() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_cancel_bg").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("cancel_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("cancel_cf");
+
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "k".getBytes(StandardCharsets.UTF_8),
+                            "v".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+
+            // Sticky db-wide cancel of background compaction; flushes are unaffected.
+            assertDoesNotThrow(db::cancelBackgroundWork);
+        }
+    }
+
+    @Test
+    @Order(50)
+    void testFinishCompactionsOnClose() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_finish_compactions").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .finishCompactionsOnClose(true)
+            .build();
+
+        assertTrue(config.isFinishCompactionsOnClose());
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("finish_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("finish_cf");
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "k".getBytes(StandardCharsets.UTF_8),
+                            "v".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+            cf.flushMemtable();
+        }
+        // close() returning without error is the observable contract for this flag.
+    }
+
+    @Test
+    @Order(51)
+    void testCfConfigIniRoundTrip() throws TidesDBException {
+        String iniFile = tempDir.resolve("cf_config.ini").toString();
+        String section = "round_trip_cf";
+
+        ColumnFamilyConfig original = ColumnFamilyConfig.builder()
+            .writeBufferSize(96 * 1024 * 1024)
+            .levelSizeRatio(8)
+            .minLevels(4)
+            .klogValueThreshold(1024)
+            .compressionAlgorithm(CompressionAlgorithm.ZSTD_COMPRESSION)
+            .enableBloomFilter(true)
+            .bloomFPR(0.02)
+            .enableBlockIndexes(true)
+            .indexSampleRatio(2)
+            .blockIndexPrefixLen(8)
+            .syncMode(SyncMode.SYNC_INTERVAL)
+            .syncIntervalUs(250000)
+            .defaultIsolationLevel(IsolationLevel.SNAPSHOT)
+            .l1FileCountTrigger(6)
+            .l0QueueStallThreshold(15)
+            .tombstoneDensityTrigger(0.4)
+            .tombstoneDensityMinEntries(2048)
+            .minDiskSpace(50 * 1024 * 1024)
+            .useBtree(true)
+            .objectLazyCompaction(true)
+            .objectPrefetchCompaction(false)
+            .build();
+
+        original.saveToIni(iniFile, section);
+
+        ColumnFamilyConfig loaded = ColumnFamilyConfig.loadFromIni(iniFile, section);
+
+        assertEquals(original.getWriteBufferSize(), loaded.getWriteBufferSize());
+        assertEquals(original.getLevelSizeRatio(), loaded.getLevelSizeRatio());
+        assertEquals(original.getMinLevels(), loaded.getMinLevels());
+        assertEquals(original.getKlogValueThreshold(), loaded.getKlogValueThreshold());
+        assertEquals(original.getCompressionAlgorithm(), loaded.getCompressionAlgorithm());
+        assertEquals(original.isEnableBloomFilter(), loaded.isEnableBloomFilter());
+        assertEquals(original.getBloomFPR(), loaded.getBloomFPR(), 1e-9);
+        assertEquals(original.isEnableBlockIndexes(), loaded.isEnableBlockIndexes());
+        assertEquals(original.getIndexSampleRatio(), loaded.getIndexSampleRatio());
+        assertEquals(original.getBlockIndexPrefixLen(), loaded.getBlockIndexPrefixLen());
+        assertEquals(original.getSyncMode(), loaded.getSyncMode());
+        assertEquals(original.getSyncIntervalUs(), loaded.getSyncIntervalUs());
+        assertEquals(original.getDefaultIsolationLevel(), loaded.getDefaultIsolationLevel());
+        assertEquals(original.getL1FileCountTrigger(), loaded.getL1FileCountTrigger());
+        assertEquals(original.getL0QueueStallThreshold(), loaded.getL0QueueStallThreshold());
+        assertEquals(original.getTombstoneDensityTrigger(), loaded.getTombstoneDensityTrigger(), 1e-9);
+        assertEquals(original.getTombstoneDensityMinEntries(), loaded.getTombstoneDensityMinEntries());
+        assertEquals(original.getMinDiskSpace(), loaded.getMinDiskSpace());
+        assertEquals(original.isUseBtree(), loaded.isUseBtree());
+        assertEquals(original.isObjectLazyCompaction(), loaded.isObjectLazyCompaction());
+        assertEquals(original.isObjectPrefetchCompaction(), loaded.isObjectPrefetchCompaction());
+    }
+
+    @Test
+    @Order(52)
+    void testCfConfigIniInvalidArgs() {
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.defaultConfig().saveToIni(null, "s"));
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.defaultConfig().saveToIni("f.ini", ""));
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.loadFromIni("", "s"));
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.loadFromIni("f.ini", null));
+        // Reading a non-existent INI file surfaces as a TidesDBException, not a crash.
+        assertThrows(TidesDBException.class,
+            () -> ColumnFamilyConfig.loadFromIni(
+                tempDir.resolve("does_not_exist.ini").toString(), "nope"));
+    }
+
+    @Test
+    @Order(53)
+    void testWriteAmplificationCounters() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_write_amp").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("wa_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("wa_cf");
+
+            for (int i = 0; i < 200; i++) {
+                try (Transaction txn = db.beginTransaction()) {
+                    txn.put(cf, ("key" + i).getBytes(StandardCharsets.UTF_8),
+                                ("value" + i).getBytes(StandardCharsets.UTF_8));
+                    txn.commit();
+                }
+            }
+            cf.flushMemtable();
+            cf.purge();
+
+            Stats stats = cf.getStats();
+            // Counters are non-negative and user bytes reflect the committed payload.
+            assertTrue(stats.getUserBytesWritten() > 0, "user bytes should be recorded");
+            assertTrue(stats.getWalBytesWritten() >= 0);
+            assertTrue(stats.getFlushBytesWritten() >= 0);
+            assertTrue(stats.getCompactionBytesWritten() >= 0);
+            assertTrue(stats.getCompactionBytesRead() >= 0);
+            assertTrue(stats.getFlushCount() >= 0);
+            assertTrue(stats.getCompactionCount() >= 0);
+
+            DbStats dbStats = db.getDbStats();
+            assertTrue(dbStats.getUserBytesWritten() > 0, "db-wide user bytes should be recorded");
+            assertTrue(dbStats.getUwalBytesWritten() >= 0);
+            assertTrue(dbStats.getWalBytesWritten() >= 0);
+            assertTrue(dbStats.getFlushBytesWritten() >= 0);
+            assertTrue(dbStats.getCompactionBytesWritten() >= 0);
+            assertTrue(dbStats.getCompactionBytesRead() >= 0);
+            assertTrue(dbStats.getFlushCount() >= 0);
+            assertTrue(dbStats.getCompactionCount() >= 0);
         }
     }
 }

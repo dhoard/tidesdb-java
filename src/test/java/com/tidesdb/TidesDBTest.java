@@ -1955,4 +1955,73 @@ public class TidesDBTest {
             assertTrue(dbStats.getCompactionCount() >= 0);
         }
     }
+
+    @Test
+    @Order(54)
+    void testS3ConfigBuilderValidation() {
+        // Required fields must be present
+        assertThrows(IllegalArgumentException.class, () -> S3Config.builder().build());
+        assertThrows(IllegalArgumentException.class,
+            () -> S3Config.builder().endpoint("s3.amazonaws.com").build());
+        assertThrows(IllegalArgumentException.class,
+            () -> S3Config.builder().endpoint("s3.amazonaws.com").bucket("b").build());
+        assertThrows(IllegalArgumentException.class,
+            () -> S3Config.builder().endpoint("s3.amazonaws.com").bucket("b").accessKey("ak").build());
+
+        // A fully specified config builds and exposes its values, with secure defaults
+        S3Config s3 = S3Config.builder()
+            .endpoint("s3.amazonaws.com")
+            .bucket("my-bucket")
+            .prefix("prod/db1/")
+            .accessKey("AKID")
+            .secretKey("SECRET")
+            .region("us-east-1")
+            .build();
+        assertEquals("s3.amazonaws.com", s3.getEndpoint());
+        assertEquals("my-bucket", s3.getBucket());
+        assertEquals("prod/db1/", s3.getPrefix());
+        assertEquals("us-east-1", s3.getRegion());
+        assertTrue(s3.isUseSsl(), "TLS should be on by default");
+        assertFalse(s3.isUsePathStyle(), "virtual-hosted by default");
+        assertFalse(s3.isTlsInsecureSkipVerify(), "TLS verification on by default");
+        assertEquals(0, s3.getMultipartThreshold());
+        assertEquals(0, s3.getMultipartPartSize());
+    }
+
+    @Test
+    @Order(55)
+    void testS3Availability() {
+        // Probe must be callable and return a definite boolean without throwing.
+        boolean available = TidesDB.isS3Available();
+        assertTrue(available || !available);
+    }
+
+    @Test
+    @Order(56)
+    void testOpenWithS3Config() throws TidesDBException {
+        S3Config s3 = S3Config.builder()
+            .endpoint("127.0.0.1:9000")
+            .bucket("tidesdb-test")
+            .accessKey("minioadmin")
+            .secretKey("minioadmin")
+            .usePathStyle(true)
+            .useSsl(false)
+            .build();
+
+        Config config = Config.builder(tempDir.resolve("testdb_s3").toString())
+            .objectStoreS3Config(s3)
+            .build();
+
+        if (TidesDB.isS3Available()) {
+            // With a built-in S3 backend but no live MinIO/S3 endpoint, connector creation or
+            // open is expected to fail -- but it must surface as a TidesDBException, not a crash.
+            assertThrows(TidesDBException.class, () -> { TidesDB.open(config).close(); });
+        } else {
+            // No S3 support compiled in: opening must throw a clear, catchable exception.
+            TidesDBException ex =
+                assertThrows(TidesDBException.class, () -> TidesDB.open(config));
+            assertTrue(ex.getMessage().toLowerCase().contains("s3"),
+                "exception should explain S3 is unavailable, was: " + ex.getMessage());
+        }
+    }
 }

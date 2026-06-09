@@ -20,6 +20,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <tidesdb/db.h>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 static void throwTidesDBException(JNIEnv *env, int errorCode, const char *message)
 {
@@ -89,7 +92,7 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
     jlong oscMultipartPartSize, jboolean oscSyncManifestToObject, jboolean oscReplicateWal,
     jboolean oscWalUploadSync, jlong oscWalSyncThresholdBytes, jboolean oscWalSyncOnCommit,
     jboolean oscReplicaMode, jlong oscReplicaSyncIntervalUs, jboolean oscReplicaReplayWal,
-    jint maxConcurrentFlushes, jboolean finishCompactionsOnClose)
+    jint maxConcurrentFlushes, jboolean finishCompactionsOnClose, jlong objStoreHandle)
 {
     const char *path = (*env)->GetStringUTFChars(env, dbPath, NULL);
     if (path == NULL)
@@ -98,10 +101,16 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
         return 0;
     }
 
-    /* object store connector (filesystem) */
+    /* object store connector: a prebuilt connector handle (e.g. S3, created via
+     * nativeObjstoreS3Create) takes precedence; otherwise fall back to the filesystem
+     * connector built from objectStoreFsPath. */
     tidesdb_objstore_t *obj_store = NULL;
     const char *fs_path = NULL;
-    if (objectStoreFsPath != NULL)
+    if (objStoreHandle != 0)
+    {
+        obj_store = (tidesdb_objstore_t *)(uintptr_t)objStoreHandle;
+    }
+    else if (objectStoreFsPath != NULL)
     {
         fs_path = (*env)->GetStringUTFChars(env, objectStoreFsPath, NULL);
         if (fs_path != NULL)
@@ -176,6 +185,90 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
     }
 
     return (jlong)(uintptr_t)db;
+}
+
+/* S3 object store support is an optional build feature of the core library
+ * (TIDESDB_WITH_S3=ON). Resolve the factory at runtime via dlsym so this JNI library links and
+ * loads against a core build that lacks S3 -- callers get a clear exception instead of a
+ * load-time failure. */
+typedef tidesdb_objstore_t *(*tdb_s3_create_config_fn)(const tidesdb_objstore_s3_config_t *);
+
+static tdb_s3_create_config_fn resolve_s3_create_config(void)
+{
+#ifdef _WIN32
+    return NULL; /* S3 connector is not exposed on Windows builds */
+#else
+    return (tdb_s3_create_config_fn)dlsym(RTLD_DEFAULT, "tidesdb_objstore_s3_create_config");
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_tidesdb_TidesDB_nativeS3Available(JNIEnv *env, jclass cls)
+{
+    (void)env;
+    (void)cls;
+    return resolve_s3_create_config() != NULL ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeObjstoreS3Create(
+    JNIEnv *env, jclass cls, jstring endpoint, jstring bucket, jstring prefix, jstring accessKey,
+    jstring secretKey, jstring region, jboolean useSsl, jboolean usePathStyle, jstring tlsCaPath,
+    jboolean tlsInsecureSkipVerify, jlong multipartThreshold, jlong multipartPartSize)
+{
+    (void)cls;
+
+    tdb_s3_create_config_fn create_fn = resolve_s3_create_config();
+    if (create_fn == NULL)
+    {
+        throwTidesDBException(
+            env, TDB_ERR_INVALID_ARGS,
+            "TidesDB was built without S3 support (rebuild the core library with "
+            "TIDESDB_WITH_S3=ON)");
+        return 0;
+    }
+
+    /* required strings */
+    const char *c_endpoint = endpoint ? (*env)->GetStringUTFChars(env, endpoint, NULL) : NULL;
+    const char *c_bucket = bucket ? (*env)->GetStringUTFChars(env, bucket, NULL) : NULL;
+    const char *c_access = accessKey ? (*env)->GetStringUTFChars(env, accessKey, NULL) : NULL;
+    const char *c_secret = secretKey ? (*env)->GetStringUTFChars(env, secretKey, NULL) : NULL;
+    /* optional strings */
+    const char *c_prefix = prefix ? (*env)->GetStringUTFChars(env, prefix, NULL) : NULL;
+    const char *c_region = region ? (*env)->GetStringUTFChars(env, region, NULL) : NULL;
+    const char *c_ca = tlsCaPath ? (*env)->GetStringUTFChars(env, tlsCaPath, NULL) : NULL;
+
+    tidesdb_objstore_s3_config_t cfg = {
+        .endpoint = c_endpoint,
+        .bucket = c_bucket,
+        .prefix = c_prefix,
+        .access_key = c_access,
+        .secret_key = c_secret,
+        .region = c_region,
+        .use_ssl = useSsl ? 1 : 0,
+        .use_path_style = usePathStyle ? 1 : 0,
+        .tls_ca_path = c_ca,
+        .tls_insecure_skip_verify = tlsInsecureSkipVerify ? 1 : 0,
+        .multipart_threshold = (size_t)multipartThreshold,
+        .multipart_part_size = (size_t)multipartPartSize};
+
+    tidesdb_objstore_t *connector = create_fn(&cfg);
+
+    if (endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+    if (bucket) (*env)->ReleaseStringUTFChars(env, bucket, c_bucket);
+    if (accessKey) (*env)->ReleaseStringUTFChars(env, accessKey, c_access);
+    if (secretKey) (*env)->ReleaseStringUTFChars(env, secretKey, c_secret);
+    if (prefix) (*env)->ReleaseStringUTFChars(env, prefix, c_prefix);
+    if (region) (*env)->ReleaseStringUTFChars(env, region, c_region);
+    if (tlsCaPath) (*env)->ReleaseStringUTFChars(env, tlsCaPath, c_ca);
+
+    if (connector == NULL)
+    {
+        throwTidesDBException(env, TDB_ERR_IO,
+                              "Failed to create S3 object store connector (check endpoint, "
+                              "credentials, and bucket)");
+        return 0;
+    }
+
+    return (jlong)(uintptr_t)connector;
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativeClose(JNIEnv *env, jclass cls, jlong handle)

@@ -199,8 +199,70 @@ public class ColumnFamilyConfig {
     public boolean isObjectLazyCompaction() { return objectLazyCompaction; }
     public boolean isObjectPrefetchCompaction() { return objectPrefetchCompaction; }
 
+    /**
+     * Saves this column family configuration to an INI file under the given section.
+     * If the file already exists it is overwritten. The written file can be read back
+     * with {@link #loadFromIni(String, String)}.
+     *
+     * <p>Note: not every field round-trips. The persisted fields are the ones the engine
+     * stores in a column family's {@code config.ini} (write buffer size, level ratios,
+     * compression, bloom/index settings, sync mode, skip list parameters, isolation level,
+     * compaction triggers, tombstone density, B+tree and object-store flags, and the
+     * comparator name). Runtime-only fields such as commit hooks are not persisted.</p>
+     *
+     * @param iniFile     path to the INI file to write
+     * @param sectionName section name to write the configuration under
+     * @throws TidesDBException if the file cannot be written
+     */
+    public void saveToIni(String iniFile, String sectionName) throws TidesDBException {
+        if (iniFile == null || iniFile.isEmpty()) {
+            throw new IllegalArgumentException("INI file path cannot be null or empty");
+        }
+        if (sectionName == null || sectionName.isEmpty()) {
+            throw new IllegalArgumentException("Section name cannot be null or empty");
+        }
+        nativeSaveToIni(iniFile, sectionName,
+            writeBufferSize, levelSizeRatio, minLevels, dividingLevelOffset, klogValueThreshold,
+            compressionAlgorithm.getValue(), enableBloomFilter, bloomFPR, enableBlockIndexes,
+            indexSampleRatio, blockIndexPrefixLen, syncMode.getValue(), syncIntervalUs,
+            comparatorName, skipListMaxLevel, skipListProbability,
+            defaultIsolationLevel.getValue(), minDiskSpace, l1FileCountTrigger,
+            l0QueueStallThreshold, tombstoneDensityTrigger, tombstoneDensityMinEntries,
+            useBtree, objectLazyCompaction, objectPrefetchCompaction);
+    }
+
+    /**
+     * Loads a column family configuration from an INI file section previously written by
+     * {@link #saveToIni(String, String)} (or produced by the engine for an existing column
+     * family). Fields absent from the section fall back to the engine defaults.
+     *
+     * @param iniFile     path to the INI file to read
+     * @param sectionName section name to read the configuration from
+     * @return the loaded configuration
+     * @throws TidesDBException if the file cannot be read or the section is missing
+     */
+    public static ColumnFamilyConfig loadFromIni(String iniFile, String sectionName) throws TidesDBException {
+        if (iniFile == null || iniFile.isEmpty()) {
+            throw new IllegalArgumentException("INI file path cannot be null or empty");
+        }
+        if (sectionName == null || sectionName.isEmpty()) {
+            throw new IllegalArgumentException("Section name cannot be null or empty");
+        }
+        return nativeLoadFromIni(iniFile, sectionName);
+    }
+
     private static native double nativeDefaultTombstoneDensityTrigger();
     private static native long nativeDefaultTombstoneDensityMinEntries();
+    private static native void nativeSaveToIni(String iniFile, String sectionName,
+        long writeBufferSize, long levelSizeRatio, int minLevels, int dividingLevelOffset,
+        long klogValueThreshold, int compressionAlgorithm, boolean enableBloomFilter,
+        double bloomFPR, boolean enableBlockIndexes, int indexSampleRatio, int blockIndexPrefixLen,
+        int syncMode, long syncIntervalUs, String comparatorName, int skipListMaxLevel,
+        float skipListProbability, int defaultIsolationLevel, long minDiskSpace,
+        int l1FileCountTrigger, int l0QueueStallThreshold, double tombstoneDensityTrigger,
+        long tombstoneDensityMinEntries, boolean useBtree, boolean objectLazyCompaction,
+        boolean objectPrefetchCompaction) throws TidesDBException;
+    private static native ColumnFamilyConfig nativeLoadFromIni(String iniFile, String sectionName) throws TidesDBException;
 
     /**
      * Builder for ColumnFamilyConfig.

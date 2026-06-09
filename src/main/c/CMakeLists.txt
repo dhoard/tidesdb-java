@@ -47,6 +47,7 @@ else()
     target_link_libraries(tidesdb_jni
         ${TIDESDB_LIBRARY}
         ${JNI_LIBRARIES}
+        ${CMAKE_DL_LIBS}
     )
 endif()
 

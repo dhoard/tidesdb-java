@@ -54,6 +54,28 @@ public class TidesDB implements Closeable {
         
         ObjectStoreConfig osc = config.getObjectStoreConfig();
 
+        // Build an S3 connector up front, if requested. The native handle is owned by the
+        // database after a successful open (released by close), mirroring the filesystem
+        // connector path. Creation throws if the library was built without S3 support.
+        S3Config s3 = config.getObjectStoreS3Config();
+        long objStoreHandle = 0;
+        if (s3 != null) {
+            objStoreHandle = nativeObjstoreS3Create(
+                s3.getEndpoint(),
+                s3.getBucket(),
+                s3.getPrefix(),
+                s3.getAccessKey(),
+                s3.getSecretKey(),
+                s3.getRegion(),
+                s3.isUseSsl(),
+                s3.isUsePathStyle(),
+                s3.getTlsCaPath(),
+                s3.isTlsInsecureSkipVerify(),
+                s3.getMultipartThreshold(),
+                s3.getMultipartPartSize()
+            );
+        }
+
         long handle = nativeOpen(
             config.getDbPath(),
             config.getNumFlushThreads(),
@@ -88,10 +110,22 @@ public class TidesDB implements Closeable {
             osc != null ? osc.getReplicaSyncIntervalUs() : 5000000,
             osc != null ? osc.isReplicaReplayWal() : true,
             config.getMaxConcurrentFlushes(),
-            config.isFinishCompactionsOnClose()
+            config.isFinishCompactionsOnClose(),
+            objStoreHandle
         );
 
         return new TidesDB(handle);
+    }
+
+    /**
+     * Reports whether the native TidesDB library was built with S3 object store support
+     * ({@code TIDESDB_WITH_S3=ON}). When false, configuring a {@link S3Config} and opening the
+     * database throws a {@link TidesDBException}.
+     *
+     * @return true if an S3-compatible connector can be created, false otherwise
+     */
+    public static boolean isS3Available() {
+        return nativeS3Available();
     }
     
     /**
@@ -426,8 +460,18 @@ public class TidesDB implements Closeable {
                                           long oscReplicaSyncIntervalUs,
                                           boolean oscReplicaReplayWal,
                                           int maxConcurrentFlushes,
-                                          boolean finishCompactionsOnClose) throws TidesDBException;
-    
+                                          boolean finishCompactionsOnClose,
+                                          long objStoreHandle) throws TidesDBException;
+
+    private static native long nativeObjstoreS3Create(String endpoint, String bucket, String prefix,
+                                                      String accessKey, String secretKey, String region,
+                                                      boolean useSsl, boolean usePathStyle,
+                                                      String tlsCaPath, boolean tlsInsecureSkipVerify,
+                                                      long multipartThreshold, long multipartPartSize)
+                                                      throws TidesDBException;
+
+    private static native boolean nativeS3Available();
+
     private static native void nativeClose(long handle);
     
     private static native void nativeCreateColumnFamily(long handle, String name,

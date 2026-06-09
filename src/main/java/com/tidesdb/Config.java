@@ -44,6 +44,7 @@ public class Config {
     private long unifiedMemtableSyncIntervalUs;
     private String objectStoreFsPath;
     private ObjectStoreConfig objectStoreConfig;
+    private S3Config objectStoreS3Config;
     private int maxConcurrentFlushes;
     private boolean finishCompactionsOnClose;
 
@@ -65,6 +66,7 @@ public class Config {
         this.unifiedMemtableSyncIntervalUs = builder.unifiedMemtableSyncIntervalUs;
         this.objectStoreFsPath = builder.objectStoreFsPath;
         this.objectStoreConfig = builder.objectStoreConfig;
+        this.objectStoreS3Config = builder.objectStoreS3Config;
         this.maxConcurrentFlushes = builder.maxConcurrentFlushes;
         this.finishCompactionsOnClose = builder.finishCompactionsOnClose;
     }
@@ -170,6 +172,16 @@ public class Config {
         return objectStoreConfig;
     }
 
+    /**
+     * Returns the S3-compatible object store connector configuration, or null if the database
+     * is not backed by S3.
+     *
+     * @return the S3 connector config, or null
+     */
+    public S3Config getObjectStoreS3Config() {
+        return objectStoreS3Config;
+    }
+
     public int getMaxConcurrentFlushes() {
         return maxConcurrentFlushes;
     }
@@ -205,6 +217,7 @@ public class Config {
         private long unifiedMemtableSyncIntervalUs = 0;
         private String objectStoreFsPath = null;
         private ObjectStoreConfig objectStoreConfig = null;
+        private S3Config objectStoreS3Config = null;
         private int maxConcurrentFlushes = 0;
         private boolean finishCompactionsOnClose = false;
 
@@ -290,6 +303,20 @@ public class Config {
 
         public Builder objectStoreConfig(ObjectStoreConfig objectStoreConfig) {
             this.objectStoreConfig = objectStoreConfig;
+            return this;
+        }
+
+        /**
+         * Backs the database with an S3-compatible object store connector (AWS S3, MinIO, etc.).
+         * Takes precedence over {@link #objectStoreFsPath(String)} when both are set. Pair with
+         * {@link #objectStoreConfig(ObjectStoreConfig)} to tune cache, multipart, and replication
+         * behavior. Requires the native library to be built with {@code TIDESDB_WITH_S3=ON}.
+         *
+         * @param objectStoreS3Config the S3 connector configuration, or null for none
+         * @return this builder
+         */
+        public Builder objectStoreS3Config(S3Config objectStoreS3Config) {
+            this.objectStoreS3Config = objectStoreS3Config;
             return this;
         }
 

@@ -54,6 +54,8 @@ public class DbStats {
     private final long totalUploads;
     private final long totalUploadFailures;
     private final boolean replicaMode;
+    private final long primaryEpoch;
+    private final long seenEpoch;
     private final long uwalBytesWritten;
     private final long walBytesWritten;
     private final long flushBytesWritten;
@@ -75,6 +77,7 @@ public class DbStats {
                    long localCacheBytesUsed, long localCacheBytesMax, int localCacheNumFiles,
                    long lastUploadedGeneration, long uploadQueueDepth,
                    long totalUploads, long totalUploadFailures, boolean replicaMode,
+                   long primaryEpoch, long seenEpoch,
                    long uwalBytesWritten, long walBytesWritten, long flushBytesWritten,
                    long compactionBytesWritten, long compactionBytesRead, long userBytesWritten,
                    long flushCount, long compactionCount) {
@@ -109,6 +112,8 @@ public class DbStats {
         this.totalUploads = totalUploads;
         this.totalUploadFailures = totalUploadFailures;
         this.replicaMode = replicaMode;
+        this.primaryEpoch = primaryEpoch;
+        this.seenEpoch = seenEpoch;
         this.uwalBytesWritten = uwalBytesWritten;
         this.walBytesWritten = walBytesWritten;
         this.flushBytesWritten = flushBytesWritten;
@@ -244,6 +249,27 @@ public class DbStats {
     }
 
     /**
+     * Gets the lease epoch this primary currently holds (object-store single-writer fencing).
+     * Returns 0 when this node is not a primary or holds no lease. A promotion that takes
+     * effect bumps this value.
+     *
+     * @return the current primary lease epoch, or 0 if not a primary
+     */
+    public long getPrimaryEpoch() {
+        return primaryEpoch;
+    }
+
+    /**
+     * Gets the highest lease epoch this node has observed (object-store single-writer fencing).
+     * A fenced primary sees {@link #isReplicaMode()} flip back to true once a newer epoch is seen.
+     *
+     * @return the highest observed lease epoch
+     */
+    public long getSeenEpoch() {
+        return seenEpoch;
+    }
+
+    /**
      * Gets the framed bytes appended to the shared unified WAL (lifetime since open).
      * Returns 0 when unified memtable mode is off.
      *
@@ -355,6 +381,8 @@ public class DbStats {
             ", totalUploads=" + totalUploads +
             ", totalUploadFailures=" + totalUploadFailures +
             ", replicaMode=" + replicaMode +
+            ", primaryEpoch=" + primaryEpoch +
+            ", seenEpoch=" + seenEpoch +
             ", uwalBytesWritten=" + uwalBytesWritten +
             ", walBytesWritten=" + walBytesWritten +
             ", flushBytesWritten=" + flushBytesWritten +

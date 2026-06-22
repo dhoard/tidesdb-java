@@ -1423,10 +1423,12 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetDbStats(JNIEnv *env,
     /* Constructor signature:
        int, long, long, long, int, int, long, int, int, long, int, long, long, long, long,
        boolean, long, int, boolean, int, long,
-       boolean, String, long, long, int, long, long, long, long, boolean */
+       boolean, String, long, long, int, long, long, long, long, boolean,
+       long (primaryEpoch), long (seenEpoch),
+       long, long, long, long, long, long, long, long */
     jmethodID constructor = (*env)->GetMethodID(
         env, dbStatsClass, "<init>",
-        "(IJJJIIJIIJIJJJJZJIZIJZLjava/lang/String;JJIJJJJZJJJJJJJJ)V");
+        "(IJJJIIJIIJIJJJJZJIZIJZLjava/lang/String;JJIJJJJZJJJJJJJJJJ)V");
 
     jstring connectorStr = NULL;
     if (db_stats.object_store_connector != NULL)
@@ -1466,6 +1468,8 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetDbStats(JNIEnv *env,
                              (jlong)db_stats.total_uploads,
                              (jlong)db_stats.total_upload_failures,
                              db_stats.replica_mode != 0,
+                             (jlong)db_stats.primary_epoch,
+                             (jlong)db_stats.seen_epoch,
                              (jlong)db_stats.uwal_bytes_written,
                              (jlong)db_stats.wal_bytes_written,
                              (jlong)db_stats.flush_bytes_written,

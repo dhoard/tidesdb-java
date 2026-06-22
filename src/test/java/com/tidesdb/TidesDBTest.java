@@ -1480,11 +1480,17 @@ public class TidesDBTest {
             assertTrue(dbStats.getTotalUploads() >= 0);
             assertTrue(dbStats.getTotalUploadFailures() >= 0);
 
+            // Single-writer fencing epochs default to 0 outside object-store primary mode
+            assertEquals(0, dbStats.getPrimaryEpoch());
+            assertTrue(dbStats.getSeenEpoch() >= 0);
+
             // Verify toString includes new fields
             String str = dbStats.toString();
             assertTrue(str.contains("unifiedMemtableEnabled="));
             assertTrue(str.contains("objectStoreEnabled="));
             assertTrue(str.contains("replicaMode="));
+            assertTrue(str.contains("primaryEpoch="));
+            assertTrue(str.contains("seenEpoch="));
         }
     }
 

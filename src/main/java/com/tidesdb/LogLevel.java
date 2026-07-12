@@ -52,7 +52,7 @@ public enum LogLevel {
     /**
      * Logging disabled.
      */
-    NONE(5);
+    NONE(99);
     
     private final int value;
     

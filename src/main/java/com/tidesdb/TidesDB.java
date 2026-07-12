@@ -63,16 +63,80 @@ public class TidesDB implements Closeable {
             throw new IllegalArgumentException("Database path cannot be null or empty");
         }
         
+        ObjectStoreConfig osc = config.getObjectStoreConfig();
+
+        // Build an S3 connector up front, if requested. The native handle is owned by the
+        // database after a successful open (released by close), mirroring the filesystem
+        // connector path. Creation throws if the library was built without S3 support.
+        S3Config s3 = config.getObjectStoreS3Config();
+        long objStoreHandle = 0;
+        if (s3 != null) {
+            objStoreHandle = nativeObjstoreS3Create(
+                s3.getEndpoint(),
+                s3.getBucket(),
+                s3.getPrefix(),
+                s3.getAccessKey(),
+                s3.getSecretKey(),
+                s3.getRegion(),
+                s3.isUseSsl(),
+                s3.isUsePathStyle(),
+                s3.getTlsCaPath(),
+                s3.isTlsInsecureSkipVerify(),
+                s3.getMultipartThreshold(),
+                s3.getMultipartPartSize()
+            );
+        }
+
         long handle = nativeOpen(
             config.getDbPath(),
             config.getNumFlushThreads(),
             config.getNumCompactionThreads(),
             config.getLogLevel().getValue(),
             config.getBlockCacheSize(),
-            config.getMaxOpenSSTables()
+            config.getMaxOpenSSTables(),
+            config.isLogToFile(),
+            config.getLogTruncationAt(),
+            config.getMaxMemoryUsage(),
+            config.isUnifiedMemtable(),
+            config.getUnifiedMemtableWriteBufferSize(),
+            config.getUnifiedMemtableSkipListMaxLevel(),
+            config.getUnifiedMemtableSkipListProbability(),
+            config.getUnifiedMemtableSyncMode(),
+            config.getUnifiedMemtableSyncIntervalUs(),
+            config.getObjectStoreFsPath(),
+            osc != null ? osc.getLocalCachePath() : null,
+            osc != null ? osc.getLocalCacheMaxBytes() : 0,
+            osc != null ? osc.isCacheOnRead() : true,
+            osc != null ? osc.isCacheOnWrite() : true,
+            osc != null ? osc.getMaxConcurrentUploads() : 4,
+            osc != null ? osc.getMaxConcurrentDownloads() : 8,
+            osc != null ? osc.getMultipartThreshold() : 64 * 1024 * 1024,
+            osc != null ? osc.getMultipartPartSize() : 8 * 1024 * 1024,
+            osc != null ? osc.isSyncManifestToObject() : true,
+            osc != null ? osc.isReplicateWal() : true,
+            osc != null ? osc.isWalUploadSync() : false,
+            osc != null ? osc.getWalSyncThresholdBytes() : 1048576,
+            osc != null ? osc.isWalSyncOnCommit() : false,
+            osc != null ? osc.isReplicaMode() : false,
+            osc != null ? osc.getReplicaSyncIntervalUs() : 5000000,
+            osc != null ? osc.isReplicaReplayWal() : true,
+            config.getMaxConcurrentFlushes(),
+            config.isFinishCompactionsOnClose(),
+            objStoreHandle
         );
-        
+
         return new TidesDB(handle);
+    }
+
+    /**
+     * Reports whether the native TidesDB library was built with S3 object store support
+     * ({@code TIDESDB_WITH_S3=ON}). When false, configuring a {@link S3Config} and opening the
+     * database throws a {@link TidesDBException}.
+     *
+     * @return true if an S3-compatible connector can be created, false otherwise
+     */
+    public static boolean isS3Available() {
+        return nativeS3Available();
     }
     
     /**
@@ -132,7 +196,12 @@ public class TidesDB implements Closeable {
             config.getDefaultIsolationLevel().getValue(),
             config.getMinDiskSpace(),
             config.getL1FileCountTrigger(),
-            config.getL0QueueStallThreshold()
+            config.getL0QueueStallThreshold(),
+            config.getTombstoneDensityTrigger(),
+            config.getTombstoneDensityMinEntries(),
+            config.isUseBtree(),
+            config.isObjectLazyCompaction(),
+            config.isObjectPrefetchCompaction()
         );
     }
     
@@ -247,6 +316,156 @@ public class TidesDB implements Closeable {
         nativeRegisterComparator(nativeHandle, name, context);
     }
     
+    /**
+     * Creates an on-disk snapshot of the database without blocking normal reads/writes.
+     *
+     * @param dir the backup directory (must be non-existent or empty)
+     * @throws TidesDBException if the backup fails
+     */
+    public void backup(String dir) throws TidesDBException {
+        checkNotClosed();
+        if (dir == null || dir.isEmpty()) {
+            throw new IllegalArgumentException("Backup directory cannot be null or empty");
+        }
+        nativeBackup(nativeHandle, dir);
+    }
+    
+    /**
+     * Creates a lightweight, near-instant snapshot of an open database using hard links
+     * instead of copying SSTable data.
+     *
+     * @param dir the checkpoint directory (must be non-existent or empty)
+     * @throws TidesDBException if the checkpoint fails
+     */
+    public void checkpoint(String dir) throws TidesDBException {
+        checkNotClosed();
+        if (dir == null || dir.isEmpty()) {
+            throw new IllegalArgumentException("Checkpoint directory cannot be null or empty");
+        }
+        nativeCheckpoint(nativeHandle, dir);
+    }
+    
+    /**
+     * Atomically renames a column family and its underlying directory.
+     * The operation waits for any in-progress flush or compaction to complete before renaming.
+     *
+     * @param oldName the current column family name
+     * @param newName the new column family name
+     * @throws TidesDBException if the rename fails
+     */
+    public void renameColumnFamily(String oldName, String newName) throws TidesDBException {
+        checkNotClosed();
+        if (oldName == null || oldName.isEmpty()) {
+            throw new IllegalArgumentException("Old column family name cannot be null or empty");
+        }
+        if (newName == null || newName.isEmpty()) {
+            throw new IllegalArgumentException("New column family name cannot be null or empty");
+        }
+        nativeRenameColumnFamily(nativeHandle, oldName, newName);
+    }
+    
+    /**
+     * Creates a complete copy of an existing column family with a new name.
+     * The clone contains all the data from the source at the time of cloning.
+     * The clone is completely independent - modifications to one do not affect the other.
+     *
+     * @param sourceName the source column family name
+     * @param destName the destination column family name
+     * @throws TidesDBException if the clone fails
+     */
+    public void cloneColumnFamily(String sourceName, String destName) throws TidesDBException {
+        checkNotClosed();
+        if (sourceName == null || sourceName.isEmpty()) {
+            throw new IllegalArgumentException("Source column family name cannot be null or empty");
+        }
+        if (destName == null || destName.isEmpty()) {
+            throw new IllegalArgumentException("Destination column family name cannot be null or empty");
+        }
+        nativeCloneColumnFamily(nativeHandle, sourceName, destName);
+    }
+    
+    /**
+     * Forces a synchronous flush and aggressive compaction for all column families,
+     * then drains both the global flush and compaction queues.
+     * This blocks until all work is complete.
+     *
+     * @throws TidesDBException if the purge fails
+     */
+    public void purge() throws TidesDBException {
+        checkNotClosed();
+        nativePurge(nativeHandle);
+    }
+    
+    /**
+     * Deletes a column family using its handle.
+     * This is an alternative to {@link #dropColumnFamily(String)} that takes a column family
+     * object instead of a name.
+     *
+     * @param cf the column family to delete
+     * @throws TidesDBException if the column family cannot be deleted
+     */
+    public void deleteColumnFamily(ColumnFamily cf) throws TidesDBException {
+        checkNotClosed();
+        if (cf == null) {
+            throw new IllegalArgumentException("Column family cannot be null");
+        }
+        nativeDeleteColumnFamily(nativeHandle, cf.getNativeHandle());
+    }
+
+    /**
+     * Switches a read-only replica database to primary mode.
+     *
+     * @throws TidesDBException if not in replica mode or promotion fails
+     */
+    public void promoteToPrimary() throws TidesDBException {
+        checkNotClosed();
+        nativePromoteToPrimary(nativeHandle);
+    }
+
+    /**
+     * Retrieves aggregate statistics across the entire database instance.
+     *
+     * @return database-level statistics
+     * @throws TidesDBException if the stats cannot be retrieved
+     */
+    public DbStats getDbStats() throws TidesDBException {
+        checkNotClosed();
+        return nativeGetDbStats(nativeHandle);
+    }
+
+    /**
+     * Cancels background compaction database-wide. In-flight merges bail safely at their
+     * next checkpoint (their uncommitted output is discarded, inputs are left intact, so no
+     * data is lost) and any queued compaction is skipped. Flushes are unaffected, so
+     * durability is preserved. Blocks (bounded) until compaction is idle.
+     *
+     * <p>The cancellation is sticky for the session and is reset on the next open. It is
+     * intended to be called immediately before {@link #close()} for a fast shutdown.</p>
+     *
+     * @throws TidesDBException if the operation fails
+     */
+    public void cancelBackgroundWork() throws TidesDBException {
+        checkNotClosed();
+        nativeCancelBackgroundWork(nativeHandle);
+    }
+
+    /**
+     * Raises this process's open-file ceiling toward {@code desired} descriptors so a database
+     * can keep more SSTables open. The engine sizes {@code maxOpenSSTables} to fit this at open
+     * time, so call it <strong>before</strong> {@link #open(Config)}. This is an explicit, opt-in
+     * operator action; TidesDB never raises the limit itself.
+     *
+     * <p>On POSIX systems (Linux, macOS, the BSDs, illumos) this raises the {@code RLIMIT_NOFILE}
+     * soft limit toward the hard limit; on Windows it raises the CRT stdio cap (max 8192). A
+     * failed or partial raise is non-fatal.</p>
+     *
+     * @param desired target descriptor count; values &le; 0 just report the current ceiling
+     * @return the open-file ceiling in effect after the attempt
+     */
+    public static long raiseOpenFileLimit(long desired) {
+        return nativeRaiseOpenFileLimit(desired);
+    }
+
     private void checkNotClosed() {
         if (closed) {
             throw new IllegalStateException("TidesDB instance is closed");
@@ -258,8 +477,37 @@ public class TidesDB implements Closeable {
     }
     
     private static native long nativeOpen(String dbPath, int numFlushThreads, int numCompactionThreads,
-                                          int logLevel, long blockCacheSize, long maxOpenSSTables) throws TidesDBException;
-    
+                                          int logLevel, long blockCacheSize, long maxOpenSSTables,
+                                          boolean logToFile, long logTruncationAt,
+                                          long maxMemoryUsage, boolean unifiedMemtable,
+                                          long unifiedMemtableWriteBufferSize,
+                                          int unifiedMemtableSkipListMaxLevel,
+                                          float unifiedMemtableSkipListProbability,
+                                          int unifiedMemtableSyncMode,
+                                          long unifiedMemtableSyncIntervalUs,
+                                          String objectStoreFsPath,
+                                          String oscLocalCachePath, long oscLocalCacheMaxBytes,
+                                          boolean oscCacheOnRead, boolean oscCacheOnWrite,
+                                          int oscMaxConcurrentUploads, int oscMaxConcurrentDownloads,
+                                          long oscMultipartThreshold, long oscMultipartPartSize,
+                                          boolean oscSyncManifestToObject, boolean oscReplicateWal,
+                                          boolean oscWalUploadSync, long oscWalSyncThresholdBytes,
+                                          boolean oscWalSyncOnCommit, boolean oscReplicaMode,
+                                          long oscReplicaSyncIntervalUs,
+                                          boolean oscReplicaReplayWal,
+                                          int maxConcurrentFlushes,
+                                          boolean finishCompactionsOnClose,
+                                          long objStoreHandle) throws TidesDBException;
+
+    private static native long nativeObjstoreS3Create(String endpoint, String bucket, String prefix,
+                                                      String accessKey, String secretKey, String region,
+                                                      boolean useSsl, boolean usePathStyle,
+                                                      String tlsCaPath, boolean tlsInsecureSkipVerify,
+                                                      long multipartThreshold, long multipartPartSize)
+                                                      throws TidesDBException;
+
+    private static native boolean nativeS3Available();
+
     private static native void nativeClose(long handle);
     
     private static native void nativeCreateColumnFamily(long handle, String name,
@@ -268,7 +516,11 @@ public class TidesDB implements Closeable {
         double bloomFPR, boolean enableBlockIndexes, int indexSampleRatio, int blockIndexPrefixLen,
         int syncMode, long syncIntervalUs, String comparatorName, int skipListMaxLevel,
         float skipListProbability, int defaultIsolationLevel, long minDiskSpace,
-        int l1FileCountTrigger, int l0QueueStallThreshold) throws TidesDBException;
+        int l1FileCountTrigger, int l0QueueStallThreshold,
+        double tombstoneDensityTrigger, long tombstoneDensityMinEntries,
+        boolean useBtree,
+        boolean objectLazyCompaction,
+        boolean objectPrefetchCompaction) throws TidesDBException;
     
     private static native void nativeDropColumnFamily(long handle, String name) throws TidesDBException;
     
@@ -283,4 +535,24 @@ public class TidesDB implements Closeable {
     private static native CacheStats nativeGetCacheStats(long handle) throws TidesDBException;
     
     private static native void nativeRegisterComparator(long handle, String name, String context) throws TidesDBException;
+    
+    private static native void nativeBackup(long handle, String dir) throws TidesDBException;
+    
+    private static native void nativeCheckpoint(long handle, String dir) throws TidesDBException;
+    
+    private static native void nativeRenameColumnFamily(long handle, String oldName, String newName) throws TidesDBException;
+    
+    private static native void nativeCloneColumnFamily(long handle, String sourceName, String destName) throws TidesDBException;
+    
+    private static native void nativePurge(long handle) throws TidesDBException;
+
+    private static native DbStats nativeGetDbStats(long handle) throws TidesDBException;
+
+    private static native void nativeDeleteColumnFamily(long handle, long cfHandle) throws TidesDBException;
+
+    private static native void nativePromoteToPrimary(long handle) throws TidesDBException;
+
+    private static native void nativeCancelBackgroundWork(long handle) throws TidesDBException;
+
+    private static native long nativeRaiseOpenFileLimit(long desired);
 }

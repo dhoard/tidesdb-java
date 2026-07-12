@@ -37,6 +37,7 @@ public class ColumnFamily {
     
     private final long nativeHandle;
     private final String name;
+    private long commitHookCtxHandle = 0;
     
     ColumnFamily(long nativeHandle, String name) {
         this.nativeHandle = nativeHandle;
@@ -70,6 +71,24 @@ public class ColumnFamily {
     public void compact() throws TidesDBException {
         nativeCompact(nativeHandle);
     }
+
+    /**
+     * Synchronously compacts every SSTable whose key range overlaps {@code [startKey, endKey)}.
+     * Blocks the calling thread until the merge commits or fails - does not enqueue work
+     * onto the compaction thread pool.
+     *
+     * <p>A {@code null} or empty endpoint means unbounded on that side. Both endpoints
+     * being {@code null} or empty is rejected with {@link TidesDBException}; callers
+     * wanting full-CF compaction must use {@link #compact()}.</p>
+     *
+     * @param startKey lower bound of the range, or {@code null}/empty for unbounded
+     * @param endKey   upper bound (exclusive), or {@code null}/empty for unbounded
+     * @throws TidesDBException if the range is invalid, another compaction is running,
+     *                          or the merge fails
+     */
+    public void compactRange(byte[] startKey, byte[] endKey) throws TidesDBException {
+        nativeCompactRange(nativeHandle, startKey, endKey);
+    }
     
     /**
      * Manually triggers a memtable flush for this column family.
@@ -80,11 +99,144 @@ public class ColumnFamily {
         nativeFlushMemtable(nativeHandle);
     }
     
+    /**
+     * Checks if a flush operation is currently in progress for this column family.
+     *
+     * @return true if flushing is in progress
+     */
+    public boolean isFlushing() {
+        return nativeIsFlushing(nativeHandle);
+    }
+    
+    /**
+     * Checks if a compaction operation is currently in progress for this column family.
+     *
+     * @return true if compaction is in progress
+     */
+    public boolean isCompacting() {
+        return nativeIsCompacting(nativeHandle);
+    }
+    
+    /**
+     * Updates runtime-safe configuration settings for this column family.
+     * Configuration changes are applied to new operations only.
+     * 
+     * <p>Updatable settings (safe to change at runtime):</p>
+     * <ul>
+     *   <li>writeBufferSize - Memtable flush threshold</li>
+     *   <li>skipListMaxLevel - Skip list level for new memtables</li>
+     *   <li>skipListProbability - Skip list probability for new memtables</li>
+     *   <li>bloomFPR - False positive rate for new SSTables</li>
+     *   <li>indexSampleRatio - Index sampling ratio for new SSTables</li>
+     *   <li>syncMode - Durability mode</li>
+     *   <li>syncIntervalUs - Sync interval in microseconds</li>
+     * </ul>
+     *
+     * @param config the new configuration
+     * @param persistToDisk if true, saves changes to config.ini
+     * @throws TidesDBException if the update fails
+     */
+    public void updateRuntimeConfig(ColumnFamilyConfig config, boolean persistToDisk) throws TidesDBException {
+        if (config == null) {
+            throw new IllegalArgumentException("Config cannot be null");
+        }
+        nativeUpdateRuntimeConfig(nativeHandle,
+            config.getWriteBufferSize(),
+            config.getSkipListMaxLevel(),
+            config.getSkipListProbability(),
+            config.getBloomFPR(),
+            config.getIndexSampleRatio(),
+            config.getSyncMode().getValue(),
+            config.getSyncIntervalUs(),
+            persistToDisk);
+    }
+    
+    /**
+     * Forces a synchronous flush and aggressive compaction for this column family.
+     * Unlike {@link #compact()} and {@link #flushMemtable()} (which are non-blocking),
+     * purge blocks until all flush and compaction I/O is complete.
+     *
+     * @throws TidesDBException if the purge fails
+     */
+    public void purge() throws TidesDBException {
+        nativePurge(nativeHandle);
+    }
+    
+    /**
+     * Forces an immediate fsync of the active write-ahead log for this column family.
+     * Useful for explicit durability control when using SYNC_NONE or SYNC_INTERVAL modes.
+     *
+     * @throws TidesDBException if the WAL sync fails
+     */
+    public void syncWal() throws TidesDBException {
+        nativeSyncWal(nativeHandle);
+    }
+    
+    /**
+     * Estimates the computational cost of iterating between two keys in this column family.
+     * The returned value is an opaque double - meaningful only for comparison with other
+     * values from the same method. Uses only in-memory metadata and performs no disk I/O.
+     * Key order does not matter - the method normalizes the range internally.
+     *
+     * @param keyA first key (bound of range)
+     * @param keyB second key (bound of range)
+     * @return estimated traversal cost (higher = more expensive), 0.0 if no overlapping data
+     * @throws TidesDBException if the estimation fails
+     */
+    public double rangeCost(byte[] keyA, byte[] keyB) throws TidesDBException {
+        if (keyA == null || keyA.length == 0) {
+            throw new IllegalArgumentException("keyA cannot be null or empty");
+        }
+        if (keyB == null || keyB.length == 0) {
+            throw new IllegalArgumentException("keyB cannot be null or empty");
+        }
+        return nativeRangeCost(nativeHandle, keyA, keyB);
+    }
+    
+    /**
+     * Sets a commit hook (Change Data Capture) for this column family.
+     * The hook fires synchronously after every transaction commit, receiving the full
+     * batch of committed operations atomically. Keep the callback fast to avoid
+     * stalling writers.
+     *
+     * <p>Hooks are runtime-only and not persisted. After a database restart,
+     * hooks must be re-registered by the application.</p>
+     *
+     * @param hook the commit hook callback
+     * @throws TidesDBException if the hook cannot be set
+     */
+    public void setCommitHook(CommitHook hook) throws TidesDBException {
+        if (hook == null) {
+            throw new IllegalArgumentException("Hook cannot be null, use clearCommitHook() instead");
+        }
+        commitHookCtxHandle = nativeSetCommitHook(nativeHandle, hook, commitHookCtxHandle);
+    }
+    
+    /**
+     * Clears the commit hook for this column family.
+     * After this call, no further commit callbacks will fire.
+     *
+     * @throws TidesDBException if the hook cannot be cleared
+     */
+    public void clearCommitHook() throws TidesDBException {
+        commitHookCtxHandle = nativeSetCommitHook(nativeHandle, null, commitHookCtxHandle);
+    }
+    
     long getNativeHandle() {
         return nativeHandle;
     }
     
     private static native Stats nativeGetStats(long handle) throws TidesDBException;
     private static native void nativeCompact(long handle) throws TidesDBException;
+    private static native void nativeCompactRange(long handle, byte[] startKey, byte[] endKey) throws TidesDBException;
     private static native void nativeFlushMemtable(long handle) throws TidesDBException;
+    private static native boolean nativeIsFlushing(long handle);
+    private static native boolean nativeIsCompacting(long handle);
+    private static native void nativeUpdateRuntimeConfig(long handle, long writeBufferSize,
+        int skipListMaxLevel, float skipListProbability, double bloomFPR, int indexSampleRatio,
+        int syncMode, long syncIntervalUs, boolean persistToDisk) throws TidesDBException;
+    private static native double nativeRangeCost(long handle, byte[] keyA, byte[] keyB) throws TidesDBException;
+    private static native long nativeSetCommitHook(long handle, CommitHook hook, long oldCtxHandle) throws TidesDBException;
+    private static native void nativePurge(long handle) throws TidesDBException;
+    private static native void nativeSyncWal(long handle) throws TidesDBException;
 }

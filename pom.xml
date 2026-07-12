@@ -6,7 +6,7 @@
 
     <groupId>com.tidesdb</groupId>
     <artifactId>tidesdb-java</artifactId>
-    <version>0.2.0</version>
+    <version>0.8.3</version>
     <packaging>jar</packaging>
 
     <name>TidesDB Java</name>
@@ -37,8 +37,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.release>11</maven.compiler.release>
         <junit.version>5.10.1</junit.version>
     </properties>
 
@@ -55,7 +54,7 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.27.6</version>
+            <version>3.27.7</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -66,10 +65,9 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.14.1</version>
+                <version>3.15.0</version>
                 <configuration>
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
+                    <release>${maven.compiler.release}</release>
                 </configuration>
             </plugin>
 
@@ -87,7 +85,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.2</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>enforce-plugin-versions</id>
@@ -112,7 +110,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.4</version>
+                <version>3.5.6</version>
             </plugin>
 
             <!-- JAR plugin -->
@@ -142,6 +140,12 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
                 <version>3.12.0</version>
+                <configuration>
+                    <!-- Keep doclint strict on genuine problems (malformed HTML, broken
+                         references, bad syntax) but do not require a comment on every trivial
+                         fluent builder setter / one-line accessor. -->
+                    <doclint>all,-missing</doclint>
+                </configuration>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>

@@ -4,5 +4,7 @@
         xsi:schemaLocation="https://www.mojohaus.org/VERSIONS/RULE/3.0.0 https://www.mojohaus.org/versions/versions-model/xsd/rule-3.0.0.xsd">
     <ignoreVersions>
         <ignoreVersion type="regex">(?i).*[-_.](alpha|beta|b|dev|rc|m|ea|snapshot)([-_.]?\d+)?</ignoreVersion>
+        <!-- JUnit 6+ requires Java 17; exclude major version 6 and later to stay on JUnit 5 until the project raises its Java baseline. -->
+        <ignoreVersion type="regex">^(?:[6-9]|[1-9]\d+)(?:\..*)?$</ignoreVersion>
     </ignoreVersions>
 </ruleset>

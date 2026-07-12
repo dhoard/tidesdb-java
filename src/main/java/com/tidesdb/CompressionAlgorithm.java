@@ -30,19 +30,24 @@ public enum CompressionAlgorithm {
     NO_COMPRESSION(0),
 
     /**
+     * Snappy compression.
+     */
+    SNAPPY_COMPRESSION(1),
+
+    /**
      * LZ4 compression with default settings.
      */
-    LZ4_COMPRESSION(1),
+    LZ4_COMPRESSION(2),
 
     /**
      * Zstandard compression.
      */
-    ZSTD_COMPRESSION(2),
+    ZSTD_COMPRESSION(3),
 
     /**
      * LZ4 compression optimized for speed.
      */
-    LZ4_FAST_COMPRESSION(3);
+    LZ4_FAST_COMPRESSION(4);
     
     private final int value;
     

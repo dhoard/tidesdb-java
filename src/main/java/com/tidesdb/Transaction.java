@@ -130,7 +130,33 @@ public class Transaction implements Closeable {
         }
         nativeDelete(nativeHandle, cf.getNativeHandle(), key);
     }
-    
+
+    /**
+     * Writes a single-delete tombstone for a key. Has the same read semantics as
+     * {@link #delete}, but lets compaction drop the put and tombstone together as
+     * soon as both appear in the same merge input.
+     *
+     * Caller contract: between any two single-deletes on the same key (and from
+     * the start of the key's history to its first single-delete) the key has been
+     * put at most once. The engine cannot verify this; violating it can leave
+     * older puts visible after the single-delete. Use only for workloads that
+     * insert each key once and delete it once. When in doubt, prefer {@link #delete}.
+     *
+     * @param cf the column family
+     * @param key the key
+     * @throws TidesDBException if the single-delete fails
+     */
+    public void singleDelete(ColumnFamily cf, byte[] key) throws TidesDBException {
+        checkNotFreed();
+        if (cf == null) {
+            throw new IllegalArgumentException("Column family cannot be null");
+        }
+        if (key == null || key.length == 0) {
+            throw new IllegalArgumentException("Key cannot be null");
+        }
+        nativeSingleDelete(nativeHandle, cf.getNativeHandle(), key);
+    }
+
     /**
      * Commits the transaction, making all pending operations durable.
      *
@@ -222,6 +248,21 @@ public class Transaction implements Closeable {
     }
     
     /**
+     * Resets a committed or aborted transaction for reuse with a new isolation level.
+     * This avoids the overhead of freeing and reallocating transaction resources in hot loops.
+     *
+     * @param isolation the new isolation level for the reset transaction
+     * @throws TidesDBException if the reset fails (e.g., transaction is still active)
+     */
+    public void reset(IsolationLevel isolation) throws TidesDBException {
+        checkNotFreed();
+        if (isolation == null) {
+            throw new IllegalArgumentException("Isolation level cannot be null");
+        }
+        nativeReset(nativeHandle, isolation.getValue());
+    }
+    
+    /**
      * Frees the transaction and releases all native resources.
      *
      * <p>This method is idempotent; subsequent calls are no-ops. After freeing,
@@ -256,11 +297,13 @@ public class Transaction implements Closeable {
     private static native void nativePut(long handle, long cfHandle, byte[] key, byte[] value, long ttl) throws TidesDBException;
     private static native byte[] nativeGet(long handle, long cfHandle, byte[] key) throws TidesDBException;
     private static native void nativeDelete(long handle, long cfHandle, byte[] key) throws TidesDBException;
+    private static native void nativeSingleDelete(long handle, long cfHandle, byte[] key) throws TidesDBException;
     private static native void nativeCommit(long handle) throws TidesDBException;
     private static native void nativeRollback(long handle) throws TidesDBException;
     private static native void nativeSavepoint(long handle, String name) throws TidesDBException;
     private static native void nativeRollbackToSavepoint(long handle, String name) throws TidesDBException;
     private static native void nativeReleaseSavepoint(long handle, String name) throws TidesDBException;
     private static native long nativeNewIterator(long handle, long cfHandle) throws TidesDBException;
+    private static native void nativeReset(long handle, int isolationLevel) throws TidesDBException;
     private static native void nativeFree(long handle);
 }

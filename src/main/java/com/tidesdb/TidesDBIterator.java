@@ -163,6 +163,19 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
+     * Retrieves the current key and value from the iterator in a single call.
+     * More efficient than calling {@link #key()} and {@link #value()} separately
+     * as it requires only one JNI crossing.
+     *
+     * @return a KeyValue containing the current key and value
+     * @throws TidesDBException if the key/value cannot be retrieved
+     */
+    public KeyValue keyValue() throws TidesDBException {
+        checkNotFreed();
+        return nativeKeyValue(nativeHandle);
+    }
+
+    /**
      * Frees the iterator and releases all native resources.
      *
      * <p>This method is idempotent; subsequent calls are no-ops. After freeing,
@@ -199,5 +212,6 @@ public class TidesDBIterator implements Closeable {
     private static native void nativePrev(long handle) throws TidesDBException;
     private static native byte[] nativeKey(long handle) throws TidesDBException;
     private static native byte[] nativeValue(long handle) throws TidesDBException;
+    private static native KeyValue nativeKeyValue(long handle) throws TidesDBException;
     private static native void nativeFree(long handle);
 }

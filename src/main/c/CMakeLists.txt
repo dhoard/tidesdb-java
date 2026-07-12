@@ -3,8 +3,8 @@ project(tidesdb_jni C)
 
 set(CMAKE_C_STANDARD 11)
 
-# Find JNI
-find_package(JNI REQUIRED)
+# Find JNI (AWT not required for JNI bindings)
+find_package(JNI REQUIRED COMPONENTS JVM)
 
 # Find TidesDB
 find_library(TIDESDB_LIBRARY tidesdb HINTS /usr/local/lib /opt/tidesdb/lib ${CMAKE_PREFIX_PATH}/lib)
@@ -47,6 +47,7 @@ else()
     target_link_libraries(tidesdb_jni
         ${TIDESDB_LIBRARY}
         ${JNI_LIBRARIES}
+        ${CMAKE_DL_LIBS}
     )
 endif()
 

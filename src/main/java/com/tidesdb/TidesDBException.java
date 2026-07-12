@@ -39,62 +39,62 @@ public class TidesDBException extends Exception {
     /**
      * Memory allocation failure.
      */
-    public static final int ERR_MEMORY = 1;
+    public static final int ERR_MEMORY = -1;
 
     /**
      * Invalid arguments passed to a native operation.
      */
-    public static final int ERR_INVALID_ARGS = 2;
+    public static final int ERR_INVALID_ARGS = -2;
 
     /**
      * Requested entry not found.
      */
-    public static final int ERR_NOT_FOUND = 3;
+    public static final int ERR_NOT_FOUND = -3;
 
     /**
      * I/O error during a native operation.
      */
-    public static final int ERR_IO = 4;
+    public static final int ERR_IO = -4;
 
     /**
      * Data corruption detected.
      */
-    public static final int ERR_CORRUPTION = 5;
+    public static final int ERR_CORRUPTION = -5;
 
     /**
      * Entry already exists.
      */
-    public static final int ERR_EXISTS = 6;
+    public static final int ERR_EXISTS = -6;
 
     /**
      * Transaction conflict.
      */
-    public static final int ERR_CONFLICT = 7;
+    public static final int ERR_CONFLICT = -7;
 
     /**
      * Key or value exceeds size limits.
      */
-    public static final int ERR_TOO_LARGE = 8;
+    public static final int ERR_TOO_LARGE = -8;
 
     /**
      * Memory limit exceeded.
      */
-    public static final int ERR_MEMORY_LIMIT = 9;
+    public static final int ERR_MEMORY_LIMIT = -9;
 
     /**
      * Invalid database handle.
      */
-    public static final int ERR_INVALID_DB = 10;
+    public static final int ERR_INVALID_DB = -10;
 
     /**
      * Unknown error.
      */
-    public static final int ERR_UNKNOWN = 11;
+    public static final int ERR_UNKNOWN = -11;
 
     /**
      * Database is locked by another process.
      */
-    public static final int ERR_LOCKED = 12;
+    public static final int ERR_LOCKED = -12;
     
     /**
      * Creates an exception with a message and an unknown error code.

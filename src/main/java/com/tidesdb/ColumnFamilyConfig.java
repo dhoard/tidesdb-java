@@ -28,7 +28,11 @@ package com.tidesdb;
  * field values.
  */
 public class ColumnFamilyConfig {
-    
+
+    static {
+        NativeLibrary.load();
+    }
+
     private long writeBufferSize;
     private long levelSizeRatio;
     private int minLevels;
@@ -49,7 +53,12 @@ public class ColumnFamilyConfig {
     private long minDiskSpace;
     private int l1FileCountTrigger;
     private int l0QueueStallThreshold;
-    
+    private double tombstoneDensityTrigger;
+    private long tombstoneDensityMinEntries;
+    private boolean useBtree;
+    private boolean objectLazyCompaction;
+    private boolean objectPrefetchCompaction;
+
     private ColumnFamilyConfig(Builder builder) {
         this.writeBufferSize = builder.writeBufferSize;
         this.levelSizeRatio = builder.levelSizeRatio;
@@ -71,60 +80,50 @@ public class ColumnFamilyConfig {
         this.minDiskSpace = builder.minDiskSpace;
         this.l1FileCountTrigger = builder.l1FileCountTrigger;
         this.l0QueueStallThreshold = builder.l0QueueStallThreshold;
+        this.tombstoneDensityTrigger = builder.tombstoneDensityTrigger;
+        this.tombstoneDensityMinEntries = builder.tombstoneDensityMinEntries;
+        this.useBtree = builder.useBtree;
+        this.objectLazyCompaction = builder.objectLazyCompaction;
+        this.objectPrefetchCompaction = builder.objectPrefetchCompaction;
     }
-    
+
     /**
-     * Creates a default column family configuration with the following values:
-     * <ul>
-     *   <li>{@code writeBufferSize}: 67108864 bytes (64 MiB)</li>
-     *   <li>{@code levelSizeRatio}: 10</li>
-     *   <li>{@code minLevels}: 4</li>
-     *   <li>{@code dividingLevelOffset}: 2</li>
-     *   <li>{@code klogValueThreshold}: 1024</li>
-     *   <li>{@code compressionAlgorithm}: {@link CompressionAlgorithm#NO_COMPRESSION}</li>
-     *   <li>{@code enableBloomFilter}: {@code false}</li>
-     *   <li>{@code bloomFPR}: 0.01</li>
-     *   <li>{@code enableBlockIndexes}: {@code false}</li>
-     *   <li>{@code indexSampleRatio}: 16</li>
-     *   <li>{@code blockIndexPrefixLen}: 4</li>
-     *   <li>{@code syncMode}: {@link SyncMode#SYNC_NONE}</li>
-     *   <li>{@code syncIntervalUs}: 0</li>
-     *   <li>{@code comparatorName}: {@code ""} (default comparator)</li>
-     *   <li>{@code skipListMaxLevel}: 12</li>
-     *   <li>{@code skipListProbability}: 0.25</li>
-     *   <li>{@code defaultIsolationLevel}: {@link IsolationLevel#READ_COMMITTED}</li>
-     *   <li>{@code minDiskSpace}: 1073741824 bytes (1 GiB)</li>
-     *   <li>{@code l1FileCountTrigger}: 4</li>
-     *   <li>{@code l0QueueStallThreshold}: 8</li>
-     * </ul>
+     * Creates a default column family configuration. The tombstone density defaults
+     * are sourced from the underlying C library so that this binding tracks the
+     * engine's defaults automatically.
      *
      * @return a new {@code ColumnFamilyConfig} with default values
      */
     public static ColumnFamilyConfig defaultConfig() {
         return new Builder()
-            .writeBufferSize(64 * 1024 * 1024)
+            .writeBufferSize(128 * 1024 * 1024)
             .levelSizeRatio(10)
-            .minLevels(4)
+            .minLevels(5)
             .dividingLevelOffset(2)
-            .klogValueThreshold(1024)
-            .compressionAlgorithm(CompressionAlgorithm.NO_COMPRESSION)
-            .enableBloomFilter(false)
+            .klogValueThreshold(512)
+            .compressionAlgorithm(CompressionAlgorithm.LZ4_COMPRESSION)
+            .enableBloomFilter(true)
             .bloomFPR(0.01)
-            .enableBlockIndexes(false)
-            .indexSampleRatio(16)
-            .blockIndexPrefixLen(4)
-            .syncMode(SyncMode.SYNC_NONE)
-            .syncIntervalUs(0)
+            .enableBlockIndexes(true)
+            .indexSampleRatio(1)
+            .blockIndexPrefixLen(16)
+            .syncMode(SyncMode.SYNC_FULL)
+            .syncIntervalUs(1000000)
             .comparatorName("")
             .skipListMaxLevel(12)
             .skipListProbability(0.25f)
             .defaultIsolationLevel(IsolationLevel.READ_COMMITTED)
-            .minDiskSpace(1024 * 1024 * 1024)
+            .minDiskSpace(100 * 1024 * 1024)
             .l1FileCountTrigger(4)
-            .l0QueueStallThreshold(8)
+            .l0QueueStallThreshold(20)
+            .tombstoneDensityTrigger(nativeDefaultTombstoneDensityTrigger())
+            .tombstoneDensityMinEntries(nativeDefaultTombstoneDensityMinEntries())
+            .useBtree(false)
+            .objectLazyCompaction(false)
+            .objectPrefetchCompaction(true)
             .build();
     }
-    
+
     /**
      * Creates a new builder with default values.
      *
@@ -133,7 +132,53 @@ public class ColumnFamilyConfig {
     public static Builder builder() {
         return new Builder();
     }
-    
+
+    /**
+     * Constructs a ColumnFamilyConfig from raw native primitives. Used by the JNI
+     * layer when reading back the configuration embedded in tidesdb_stats_t.
+     */
+    static ColumnFamilyConfig fromNative(long writeBufferSize, long levelSizeRatio, int minLevels,
+                                         int dividingLevelOffset, long klogValueThreshold,
+                                         int compressionAlgorithm, boolean enableBloomFilter,
+                                         double bloomFPR, boolean enableBlockIndexes,
+                                         int indexSampleRatio, int blockIndexPrefixLen,
+                                         int syncMode, long syncIntervalUs, String comparatorName,
+                                         int skipListMaxLevel, float skipListProbability,
+                                         int defaultIsolationLevel, long minDiskSpace,
+                                         int l1FileCountTrigger, int l0QueueStallThreshold,
+                                         double tombstoneDensityTrigger,
+                                         long tombstoneDensityMinEntries, boolean useBtree,
+                                         boolean objectLazyCompaction,
+                                         boolean objectPrefetchCompaction) {
+        return new Builder()
+            .writeBufferSize(writeBufferSize)
+            .levelSizeRatio(levelSizeRatio)
+            .minLevels(minLevels)
+            .dividingLevelOffset(dividingLevelOffset)
+            .klogValueThreshold(klogValueThreshold)
+            .compressionAlgorithm(CompressionAlgorithm.fromValue(compressionAlgorithm))
+            .enableBloomFilter(enableBloomFilter)
+            .bloomFPR(bloomFPR)
+            .enableBlockIndexes(enableBlockIndexes)
+            .indexSampleRatio(indexSampleRatio)
+            .blockIndexPrefixLen(blockIndexPrefixLen)
+            .syncMode(SyncMode.fromValue(syncMode))
+            .syncIntervalUs(syncIntervalUs)
+            .comparatorName(comparatorName == null ? "" : comparatorName)
+            .skipListMaxLevel(skipListMaxLevel)
+            .skipListProbability(skipListProbability)
+            .defaultIsolationLevel(IsolationLevel.fromValue(defaultIsolationLevel))
+            .minDiskSpace(minDiskSpace)
+            .l1FileCountTrigger(l1FileCountTrigger)
+            .l0QueueStallThreshold(l0QueueStallThreshold)
+            .tombstoneDensityTrigger(tombstoneDensityTrigger)
+            .tombstoneDensityMinEntries(tombstoneDensityMinEntries)
+            .useBtree(useBtree)
+            .objectLazyCompaction(objectLazyCompaction)
+            .objectPrefetchCompaction(objectPrefetchCompaction)
+            .build();
+    }
+
     /**
      * Returns the write-buffer (memtable) size in bytes.
      *
@@ -279,7 +324,77 @@ public class ColumnFamilyConfig {
      * @return the L0 queue stall threshold
      */
     public int getL0QueueStallThreshold() { return l0QueueStallThreshold; }
-    
+    public double getTombstoneDensityTrigger() { return tombstoneDensityTrigger; }
+    public long getTombstoneDensityMinEntries() { return tombstoneDensityMinEntries; }
+    public boolean isUseBtree() { return useBtree; }
+    public boolean isObjectLazyCompaction() { return objectLazyCompaction; }
+    public boolean isObjectPrefetchCompaction() { return objectPrefetchCompaction; }
+
+    /**
+     * Saves this column family configuration to an INI file under the given section.
+     * If the file already exists it is overwritten. The written file can be read back
+     * with {@link #loadFromIni(String, String)}.
+     *
+     * <p>Note: not every field round-trips. The persisted fields are the ones the engine
+     * stores in a column family's {@code config.ini} (write buffer size, level ratios,
+     * compression, bloom/index settings, sync mode, skip list parameters, isolation level,
+     * compaction triggers, tombstone density, B+tree and object-store flags, and the
+     * comparator name). Runtime-only fields such as commit hooks are not persisted.</p>
+     *
+     * @param iniFile     path to the INI file to write
+     * @param sectionName section name to write the configuration under
+     * @throws TidesDBException if the file cannot be written
+     */
+    public void saveToIni(String iniFile, String sectionName) throws TidesDBException {
+        if (iniFile == null || iniFile.isEmpty()) {
+            throw new IllegalArgumentException("INI file path cannot be null or empty");
+        }
+        if (sectionName == null || sectionName.isEmpty()) {
+            throw new IllegalArgumentException("Section name cannot be null or empty");
+        }
+        nativeSaveToIni(iniFile, sectionName,
+            writeBufferSize, levelSizeRatio, minLevels, dividingLevelOffset, klogValueThreshold,
+            compressionAlgorithm.getValue(), enableBloomFilter, bloomFPR, enableBlockIndexes,
+            indexSampleRatio, blockIndexPrefixLen, syncMode.getValue(), syncIntervalUs,
+            comparatorName, skipListMaxLevel, skipListProbability,
+            defaultIsolationLevel.getValue(), minDiskSpace, l1FileCountTrigger,
+            l0QueueStallThreshold, tombstoneDensityTrigger, tombstoneDensityMinEntries,
+            useBtree, objectLazyCompaction, objectPrefetchCompaction);
+    }
+
+    /**
+     * Loads a column family configuration from an INI file section previously written by
+     * {@link #saveToIni(String, String)} (or produced by the engine for an existing column
+     * family). Fields absent from the section fall back to the engine defaults.
+     *
+     * @param iniFile     path to the INI file to read
+     * @param sectionName section name to read the configuration from
+     * @return the loaded configuration
+     * @throws TidesDBException if the file cannot be read or the section is missing
+     */
+    public static ColumnFamilyConfig loadFromIni(String iniFile, String sectionName) throws TidesDBException {
+        if (iniFile == null || iniFile.isEmpty()) {
+            throw new IllegalArgumentException("INI file path cannot be null or empty");
+        }
+        if (sectionName == null || sectionName.isEmpty()) {
+            throw new IllegalArgumentException("Section name cannot be null or empty");
+        }
+        return nativeLoadFromIni(iniFile, sectionName);
+    }
+
+    private static native double nativeDefaultTombstoneDensityTrigger();
+    private static native long nativeDefaultTombstoneDensityMinEntries();
+    private static native void nativeSaveToIni(String iniFile, String sectionName,
+        long writeBufferSize, long levelSizeRatio, int minLevels, int dividingLevelOffset,
+        long klogValueThreshold, int compressionAlgorithm, boolean enableBloomFilter,
+        double bloomFPR, boolean enableBlockIndexes, int indexSampleRatio, int blockIndexPrefixLen,
+        int syncMode, long syncIntervalUs, String comparatorName, int skipListMaxLevel,
+        float skipListProbability, int defaultIsolationLevel, long minDiskSpace,
+        int l1FileCountTrigger, int l0QueueStallThreshold, double tombstoneDensityTrigger,
+        long tombstoneDensityMinEntries, boolean useBtree, boolean objectLazyCompaction,
+        boolean objectPrefetchCompaction) throws TidesDBException;
+    private static native ColumnFamilyConfig nativeLoadFromIni(String iniFile, String sectionName) throws TidesDBException;
+
     /**
      * Builder for {@link ColumnFamilyConfig}. All fields have sensible
      * defaults matching {@link #defaultConfig()}. Call {@link #build()} to
@@ -289,7 +404,7 @@ public class ColumnFamilyConfig {
      * perform Java-side validation of field values.
      */
     public static class Builder {
-        private long writeBufferSize = 64 * 1024 * 1024;
+        private long writeBufferSize = 128 * 1024 * 1024;
 
         /**
          * Creates a new builder with default values.
@@ -297,25 +412,30 @@ public class ColumnFamilyConfig {
         public Builder() {
         }
         private long levelSizeRatio = 10;
-        private int minLevels = 4;
+        private int minLevels = 5;
         private int dividingLevelOffset = 2;
-        private long klogValueThreshold = 1024;
-        private CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.NO_COMPRESSION;
-        private boolean enableBloomFilter = false;
+        private long klogValueThreshold = 512;
+        private CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.LZ4_COMPRESSION;
+        private boolean enableBloomFilter = true;
         private double bloomFPR = 0.01;
-        private boolean enableBlockIndexes = false;
-        private int indexSampleRatio = 16;
-        private int blockIndexPrefixLen = 4;
-        private SyncMode syncMode = SyncMode.SYNC_NONE;
-        private long syncIntervalUs = 0;
+        private boolean enableBlockIndexes = true;
+        private int indexSampleRatio = 1;
+        private int blockIndexPrefixLen = 16;
+        private SyncMode syncMode = SyncMode.SYNC_FULL;
+        private long syncIntervalUs = 1000000;
         private String comparatorName = "";
         private int skipListMaxLevel = 12;
         private float skipListProbability = 0.25f;
         private IsolationLevel defaultIsolationLevel = IsolationLevel.READ_COMMITTED;
-        private long minDiskSpace = 1024 * 1024 * 1024;
+        private long minDiskSpace = 100 * 1024 * 1024;
         private int l1FileCountTrigger = 4;
-        private int l0QueueStallThreshold = 8;
-        
+        private int l0QueueStallThreshold = 20;
+        private double tombstoneDensityTrigger = 0.0;
+        private long tombstoneDensityMinEntries = 1024;
+        private boolean useBtree = false;
+        private boolean objectLazyCompaction = false;
+        private boolean objectPrefetchCompaction = true;
+
         /**
          * Sets the write-buffer (memtable) size in bytes.
          *
@@ -326,7 +446,7 @@ public class ColumnFamilyConfig {
             this.writeBufferSize = writeBufferSize;
             return this;
         }
-        
+
         /**
          * Sets the size ratio between adjacent LSM levels.
          *
@@ -337,7 +457,7 @@ public class ColumnFamilyConfig {
             this.levelSizeRatio = levelSizeRatio;
             return this;
         }
-        
+
         /**
          * Sets the minimum number of LSM levels.
          *
@@ -348,7 +468,7 @@ public class ColumnFamilyConfig {
             this.minLevels = minLevels;
             return this;
         }
-        
+
         /**
          * Sets the dividing level offset for tiering decisions.
          *
@@ -359,7 +479,7 @@ public class ColumnFamilyConfig {
             this.dividingLevelOffset = dividingLevelOffset;
             return this;
         }
-        
+
         /**
          * Sets the key-log value threshold in bytes.
          *
@@ -370,7 +490,7 @@ public class ColumnFamilyConfig {
             this.klogValueThreshold = klogValueThreshold;
             return this;
         }
-        
+
         /**
          * Sets the compression algorithm for SSTables.
          *
@@ -382,7 +502,7 @@ public class ColumnFamilyConfig {
             this.compressionAlgorithm = compressionAlgorithm;
             return this;
         }
-        
+
         /**
          * Enables or disables Bloom filters.
          *
@@ -393,7 +513,7 @@ public class ColumnFamilyConfig {
             this.enableBloomFilter = enableBloomFilter;
             return this;
         }
-        
+
         /**
          * Sets the Bloom filter false-positive rate.
          *
@@ -404,7 +524,7 @@ public class ColumnFamilyConfig {
             this.bloomFPR = bloomFPR;
             return this;
         }
-        
+
         /**
          * Enables or disables block indexes.
          *
@@ -415,7 +535,7 @@ public class ColumnFamilyConfig {
             this.enableBlockIndexes = enableBlockIndexes;
             return this;
         }
-        
+
         /**
          * Sets the index sample ratio for block indexes.
          *
@@ -426,7 +546,7 @@ public class ColumnFamilyConfig {
             this.indexSampleRatio = indexSampleRatio;
             return this;
         }
-        
+
         /**
          * Sets the block index prefix length.
          *
@@ -437,7 +557,7 @@ public class ColumnFamilyConfig {
             this.blockIndexPrefixLen = blockIndexPrefixLen;
             return this;
         }
-        
+
         /**
          * Sets the sync mode for durability control.
          *
@@ -448,7 +568,7 @@ public class ColumnFamilyConfig {
             this.syncMode = syncMode;
             return this;
         }
-        
+
         /**
          * Sets the sync interval in microseconds. Only meaningful when
          * {@code syncMode} is {@link SyncMode#SYNC_INTERVAL}.
@@ -460,7 +580,7 @@ public class ColumnFamilyConfig {
             this.syncIntervalUs = syncIntervalUs;
             return this;
         }
-        
+
         /**
          * Sets the custom comparator name. An empty string selects the
          * default lexicographic comparator.
@@ -472,7 +592,7 @@ public class ColumnFamilyConfig {
             this.comparatorName = comparatorName;
             return this;
         }
-        
+
         /**
          * Sets the maximum level for the skip-list memtable.
          *
@@ -483,7 +603,7 @@ public class ColumnFamilyConfig {
             this.skipListMaxLevel = skipListMaxLevel;
             return this;
         }
-        
+
         /**
          * Sets the probability parameter for skip-list level promotion.
          *
@@ -494,7 +614,7 @@ public class ColumnFamilyConfig {
             this.skipListProbability = skipListProbability;
             return this;
         }
-        
+
         /**
          * Sets the default isolation level for transactions on this column
          * family.
@@ -507,7 +627,7 @@ public class ColumnFamilyConfig {
             this.defaultIsolationLevel = defaultIsolationLevel;
             return this;
         }
-        
+
         /**
          * Sets the minimum disk space in bytes required before writes are
          * rejected.
@@ -519,7 +639,7 @@ public class ColumnFamilyConfig {
             this.minDiskSpace = minDiskSpace;
             return this;
         }
-        
+
         /**
          * Sets the L1 file-count trigger for compaction.
          *
@@ -530,7 +650,7 @@ public class ColumnFamilyConfig {
             this.l1FileCountTrigger = l1FileCountTrigger;
             return this;
         }
-        
+
         /**
          * Sets the L0 queue stall threshold. When the L0 file count reaches
          * this threshold, writes are stalled until compaction reduces the count.
@@ -542,7 +662,32 @@ public class ColumnFamilyConfig {
             this.l0QueueStallThreshold = l0QueueStallThreshold;
             return this;
         }
-        
+
+        public Builder tombstoneDensityTrigger(double tombstoneDensityTrigger) {
+            this.tombstoneDensityTrigger = tombstoneDensityTrigger;
+            return this;
+        }
+
+        public Builder tombstoneDensityMinEntries(long tombstoneDensityMinEntries) {
+            this.tombstoneDensityMinEntries = tombstoneDensityMinEntries;
+            return this;
+        }
+
+        public Builder useBtree(boolean useBtree) {
+            this.useBtree = useBtree;
+            return this;
+        }
+
+        public Builder objectLazyCompaction(boolean objectLazyCompaction) {
+            this.objectLazyCompaction = objectLazyCompaction;
+            return this;
+        }
+
+        public Builder objectPrefetchCompaction(boolean objectPrefetchCompaction) {
+            this.objectPrefetchCompaction = objectPrefetchCompaction;
+            return this;
+        }
+
         /**
          * Creates the immutable {@link ColumnFamilyConfig}. No Java-side
          * validation of field values is performed.

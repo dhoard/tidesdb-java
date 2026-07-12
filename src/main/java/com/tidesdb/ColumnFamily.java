@@ -19,8 +19,15 @@
 package com.tidesdb;
 
 /**
- * Represents a column family in TidesDB.
- * Column families are isolated key-value stores with independent configuration.
+ * Represents a column family in TidesDB. A column family is an isolated
+ * key-value store within a database, with its own independent configuration.
+ *
+ * <p>A {@code ColumnFamily} is a handle returned by {@link TidesDB#getColumnFamily(String)}
+ * and is not independently closeable. There is no Java-side guard against using
+ * a column family after its owning database has been closed; callers must manage
+ * the lifecycle externally.
+ *
+ * <p>This class is not guaranteed to be thread-safe.
  */
 public class ColumnFamily {
     
@@ -39,7 +46,7 @@ public class ColumnFamily {
     /**
      * Gets the name of this column family.
      *
-     * @return the column family name
+     * @return the column family name, never {@code null}
      */
     public String getName() {
         return name;
@@ -48,8 +55,8 @@ public class ColumnFamily {
     /**
      * Retrieves statistics about this column family.
      *
-     * @return column family statistics
-     * @throws TidesDBException if the stats cannot be retrieved
+     * @return column family statistics, never {@code null}
+     * @throws TidesDBException if the native stats retrieval fails
      */
     public Stats getStats() throws TidesDBException {
         return nativeGetStats(nativeHandle);
@@ -58,16 +65,16 @@ public class ColumnFamily {
     /**
      * Manually triggers compaction for this column family.
      *
-     * @throws TidesDBException if compaction fails
+     * @throws TidesDBException if the native compaction fails
      */
     public void compact() throws TidesDBException {
         nativeCompact(nativeHandle);
     }
     
     /**
-     * Manually triggers memtable flush for this column family.
+     * Manually triggers a memtable flush for this column family.
      *
-     * @throws TidesDBException if flush fails
+     * @throws TidesDBException if the native flush fails
      */
     public void flushMemtable() throws TidesDBException {
         nativeFlushMemtable(nativeHandle);

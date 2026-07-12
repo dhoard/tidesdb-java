@@ -26,17 +26,47 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 /**
- * Handles loading of the native TidesDB JNI library.
+ * Handles loading of the native TidesDB JNI library ({@code tidesdb_jni}).
+ *
+ * <p>The {@link #load()} method is idempotent and {@code synchronized}; it
+ * attempts to load the native library through the following ordered lookup
+ * paths:
+ * <ol>
+ *   <li>{@code System.loadLibrary("tidesdb_jni")} using {@code java.library.path}</li>
+ *   <li>Explicit file lookup in each {@code java.library.path} directory</li>
+ *   <li>Packaged resource extraction from the classpath ({@code /native/<os>/<arch>/})</li>
+ * </ol>
+ *
+ * <p>If all paths fail, {@link UnsatisfiedLinkError} is thrown with details
+ * about the attempted paths.
+ *
+ * <p>{@link #isLoaded()} reports whether the library has been loaded
+ * successfully; it does not synchronize or guarantee availability.
  */
 public class NativeLibrary {
+    
+    private NativeLibrary() {
+        // utility class
+    }
     
     private static final String LIBRARY_NAME = "tidesdb_jni";
     private static volatile boolean loaded = false;
     private static final Object lock = new Object();
     
     /**
-     * Loads the native library.
-     * This method is idempotent and thread-safe.
+     * Loads the native TidesDB JNI library. This method is idempotent and
+     * synchronized; concurrent calls are safe and only the first call
+     * performs the actual loading.
+     *
+     * <p>The lookup order is:
+     * <ol>
+     *   <li>{@code System.loadLibrary("tidesdb_jni")} using {@code java.library.path}</li>
+     *   <li>Explicit file lookup in each {@code java.library.path} directory</li>
+     *   <li>Packaged resource extraction from the classpath</li>
+     * </ol>
+     *
+     * @throws UnsatisfiedLinkError if the library cannot be loaded through
+     *         any of the supported lookup paths
      */
     public static void load() {
         if (loaded) {
@@ -138,9 +168,13 @@ public class NativeLibrary {
     }
     
     /**
-     * Returns whether the native library has been loaded.
+     * Returns whether the native library has been loaded successfully.
      *
-     * @return true if loaded
+     * <p>This method reports the current loaded flag without synchronizing;
+     * it does not guarantee that subsequent {@link #load()} calls will
+     * succeed or that the library is usable from the calling thread.
+     *
+     * @return {@code true} if the library has been loaded
      */
     public static boolean isLoaded() {
         return loaded;

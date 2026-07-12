@@ -21,8 +21,15 @@ package com.tidesdb;
 import java.io.Closeable;
 
 /**
- * Represents a transaction in TidesDB.
- * Transactions provide atomic operations on the database.
+ * Represents a transaction in TidesDB. Transactions provide atomic
+ * operations on the database and implement {@link java.io.Closeable} for
+ * use with try-with-resources.
+ *
+ * <p>Close transactions before closing the owning {@link TidesDB} instance.
+ * After this transaction is freed, all operations except {@code close()} throw
+ * {@link IllegalStateException}.
+ *
+ * <p>This class is not guaranteed to be thread-safe.
  */
 public class Transaction implements Closeable {
     
@@ -40,11 +47,15 @@ public class Transaction implements Closeable {
     /**
      * Adds a key-value pair to the transaction.
      *
-     * @param cf the column family
-     * @param key the key
-     * @param value the value
-     * @param ttl Unix timestamp (seconds since epoch) for expiration, or -1 for no expiration
-     * @throws TidesDBException if the put fails
+     * @param cf the column family; must not be {@code null}
+     * @param key the key; must not be {@code null} or empty
+     * @param value the value; must not be {@code null}
+     * @param ttl expiration as seconds since the Unix epoch, or {@code -1} for
+     *            no expiration
+     * @throws IllegalArgumentException if {@code cf} is {@code null}, {@code key}
+     *         is {@code null} or empty, or {@code value} is {@code null}
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native put fails
      */
     public void put(ColumnFamily cf, byte[] key, byte[] value, long ttl) throws TidesDBException {
         checkNotFreed();
@@ -63,10 +74,15 @@ public class Transaction implements Closeable {
     /**
      * Adds a key-value pair to the transaction with no expiration.
      *
-     * @param cf the column family
-     * @param key the key
-     * @param value the value
-     * @throws TidesDBException if the put fails
+     * <p>Equivalent to {@code put(cf, key, value, -1)}.
+     *
+     * @param cf the column family; must not be {@code null}
+     * @param key the key; must not be {@code null} or empty
+     * @param value the value; must not be {@code null}
+     * @throws IllegalArgumentException if {@code cf} is {@code null}, {@code key}
+     *         is {@code null} or empty, or {@code value} is {@code null}
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native put fails
      */
     public void put(ColumnFamily cf, byte[] key, byte[] value) throws TidesDBException {
         put(cf, key, value, -1);
@@ -75,10 +91,13 @@ public class Transaction implements Closeable {
     /**
      * Retrieves a value from the transaction.
      *
-     * @param cf the column family
-     * @param key the key
-     * @return the value, or null if not found
-     * @throws TidesDBException if the get fails
+     * @param cf the column family; must not be {@code null}
+     * @param key the key; must not be {@code null} or empty
+     * @return the value, or {@code null} if not found
+     * @throws IllegalArgumentException if {@code cf} is {@code null}, or
+     *         {@code key} is {@code null} or empty
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native get fails
      */
     public byte[] get(ColumnFamily cf, byte[] key) throws TidesDBException {
         checkNotFreed();
@@ -94,9 +113,12 @@ public class Transaction implements Closeable {
     /**
      * Removes a key-value pair from the transaction.
      *
-     * @param cf the column family
-     * @param key the key
-     * @throws TidesDBException if the delete fails
+     * @param cf the column family; must not be {@code null}
+     * @param key the key; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code cf} is {@code null}, or
+     *         {@code key} is {@code null} or empty
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native delete fails
      */
     public void delete(ColumnFamily cf, byte[] key) throws TidesDBException {
         checkNotFreed();
@@ -110,9 +132,10 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Commits the transaction.
+     * Commits the transaction, making all pending operations durable.
      *
-     * @throws TidesDBException if the commit fails
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native commit fails
      */
     public void commit() throws TidesDBException {
         checkNotFreed();
@@ -120,9 +143,10 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Rolls back the transaction.
+     * Rolls back all operations in the transaction.
      *
-     * @throws TidesDBException if the rollback fails
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native rollback fails
      */
     public void rollback() throws TidesDBException {
         checkNotFreed();
@@ -130,10 +154,12 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Creates a savepoint within the transaction.
+     * Creates a named savepoint within the transaction.
      *
-     * @param name the savepoint name
-     * @throws TidesDBException if the savepoint cannot be created
+     * @param name the savepoint name; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native savepoint creation fails
      */
     public void savepoint(String name) throws TidesDBException {
         checkNotFreed();
@@ -144,10 +170,12 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Rolls back the transaction to a savepoint.
+     * Rolls back the transaction to a named savepoint.
      *
-     * @param name the savepoint name
-     * @throws TidesDBException if the rollback fails
+     * @param name the savepoint name; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native rollback fails
      */
     public void rollbackToSavepoint(String name) throws TidesDBException {
         checkNotFreed();
@@ -158,10 +186,12 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Releases a savepoint without rolling back.
+     * Releases a named savepoint without rolling back.
      *
-     * @param name the savepoint name
-     * @throws TidesDBException if the release fails
+     * @param name the savepoint name; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native release fails
      */
     public void releaseSavepoint(String name) throws TidesDBException {
         checkNotFreed();
@@ -172,11 +202,15 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Creates a new iterator for a column family within this transaction.
+     * Creates a new iterator for the given column family within this transaction.
      *
-     * @param cf the column family
+     * <p>Close the returned iterator before freeing this transaction.
+     *
+     * @param cf the column family; must not be {@code null}
      * @return a new iterator
-     * @throws TidesDBException if the iterator cannot be created
+     * @throws IllegalArgumentException if {@code cf} is {@code null}
+     * @throws IllegalStateException if this transaction is freed
+     * @throws TidesDBException if the native iterator cannot be created
      */
     public TidesDBIterator newIterator(ColumnFamily cf) throws TidesDBException {
         checkNotFreed();
@@ -188,7 +222,10 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Frees the transaction resources.
+     * Frees the transaction and releases all native resources.
+     *
+     * <p>This method is idempotent; subsequent calls are no-ops. After freeing,
+     * all other operations on this instance throw {@link IllegalStateException}.
      */
     public void free() {
         if (!freed && nativeHandle != 0) {
@@ -199,7 +236,7 @@ public class Transaction implements Closeable {
     }
     
     /**
-     * Closes the transaction (same as free).
+     * Closes this transaction. Equivalent to {@link #free()}.
      */
     @Override
     public void close() {

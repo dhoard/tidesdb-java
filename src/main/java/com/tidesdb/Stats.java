@@ -19,7 +19,13 @@
 package com.tidesdb;
 
 /**
- * Statistics about a column family.
+ * Statistics about a column family, including level structure, memtable size,
+ * and the active configuration. Created by the native library and returned
+ * from {@link ColumnFamily#getStats()}.
+ *
+ * <p>The arrays returned by {@link #getLevelSizes()} and
+ * {@link #getLevelNumSSTables()} are the internal stored references, not
+ * defensive copies. Callers must not modify them.
  */
 public class Stats {
     
@@ -29,6 +35,16 @@ public class Stats {
     private final int[] levelNumSSTables;
     private final ColumnFamilyConfig config;
     
+    /**
+     * Creates a new {@code Stats} instance. Typically called by the JNI
+     * bridge rather than application code.
+     *
+     * @param numLevels the number of LSM levels
+     * @param memtableSize the current memtable size in bytes
+     * @param levelSizes the size in bytes for each level (stored by reference)
+     * @param levelNumSSTables the SSTable count for each level (stored by reference)
+     * @param config the column family configuration
+     */
     public Stats(int numLevels, long memtableSize, long[] levelSizes, int[] levelNumSSTables, ColumnFamilyConfig config) {
         this.numLevels = numLevels;
         this.memtableSize = memtableSize;
@@ -38,7 +54,7 @@ public class Stats {
     }
     
     /**
-     * Gets the number of levels.
+     * Returns the number of LSM levels.
      *
      * @return the number of levels
      */
@@ -47,36 +63,43 @@ public class Stats {
     }
     
     /**
-     * Gets the memtable size in bytes.
+     * Returns the current memtable size in bytes.
      *
-     * @return the memtable size
+     * @return the memtable size in bytes
      */
     public long getMemtableSize() {
         return memtableSize;
     }
     
     /**
-     * Gets the sizes of each level in bytes.
+     * Returns the sizes of each LSM level in bytes.
      *
-     * @return array of level sizes
+     * <p>The returned array is the stored internal reference, not a
+     * defensive copy. Callers must not modify it.
+     *
+     * @return the level sizes in bytes (internal reference)
      */
     public long[] getLevelSizes() {
         return levelSizes;
     }
     
     /**
-     * Gets the number of SSTables at each level.
+     * Returns the number of SSTables at each LSM level.
      *
-     * @return array of SSTable counts per level
+     * <p>The returned array is the stored internal reference, not a
+     * defensive copy. Callers must not modify it.
+     *
+     * @return the SSTable counts per level (internal reference)
      */
     public int[] getLevelNumSSTables() {
         return levelNumSSTables;
     }
     
     /**
-     * Gets the column family configuration.
+     * Returns the column family configuration active when these statistics
+     * were captured.
      *
-     * @return the configuration
+     * @return the configuration, never {@code null}
      */
     public ColumnFamilyConfig getConfig() {
         return config;

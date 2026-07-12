@@ -19,12 +19,29 @@
 package com.tidesdb;
 
 /**
- * Compression algorithm for column families.
+ * Compression algorithm for column family SSTables. Each constant maps to an
+ * integer used by the JNI bridge.
  */
 public enum CompressionAlgorithm {
+
+    /**
+     * No compression.
+     */
     NO_COMPRESSION(0),
+
+    /**
+     * LZ4 compression with default settings.
+     */
     LZ4_COMPRESSION(1),
+
+    /**
+     * Zstandard compression.
+     */
     ZSTD_COMPRESSION(2),
+
+    /**
+     * LZ4 compression optimized for speed.
+     */
     LZ4_FAST_COMPRESSION(3);
     
     private final int value;
@@ -33,10 +50,24 @@ public enum CompressionAlgorithm {
         this.value = value;
     }
     
+    /**
+     * Returns the JNI numeric mapping for this compression algorithm.
+     *
+     * @return the integer value passed to the native library
+     */
     public int getValue() {
         return value;
     }
     
+    /**
+     * Returns the {@link CompressionAlgorithm} constant matching the given
+     * JNI integer value.
+     *
+     * @param value the JNI integer value
+     * @return the matching constant
+     * @throws IllegalArgumentException if {@code value} does not map to any
+     *         known constant
+     */
     public static CompressionAlgorithm fromValue(int value) {
         for (CompressionAlgorithm algo : values()) {
             if (algo.value == value) {

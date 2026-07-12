@@ -19,13 +19,34 @@
 package com.tidesdb;
 
 /**
- * Transaction isolation level.
+ * Transaction isolation level. Each constant maps to an integer used by the
+ * JNI bridge.
  */
 public enum IsolationLevel {
+
+    /**
+     * Reads may see uncommitted changes from other transactions.
+     */
     READ_UNCOMMITTED(0),
+
+    /**
+     * Reads see only committed data (default).
+     */
     READ_COMMITTED(1),
+
+    /**
+     * Reads within a transaction see a consistent snapshot from its start.
+     */
     REPEATABLE_READ(2),
+
+    /**
+     * Reads operate against a named snapshot.
+     */
     SNAPSHOT(3),
+
+    /**
+     * Full serializable isolation.
+     */
     SERIALIZABLE(4);
     
     private final int value;
@@ -34,10 +55,24 @@ public enum IsolationLevel {
         this.value = value;
     }
     
+    /**
+     * Returns the JNI numeric mapping for this isolation level.
+     *
+     * @return the integer value passed to the native library
+     */
     public int getValue() {
         return value;
     }
     
+    /**
+     * Returns the {@link IsolationLevel} constant matching the given JNI
+     * integer value.
+     *
+     * @param value the JNI integer value
+     * @return the matching constant
+     * @throws IllegalArgumentException if {@code value} does not map to any
+     *         known constant
+     */
     public static IsolationLevel fromValue(int value) {
         for (IsolationLevel level : values()) {
             if (level.value == value) {

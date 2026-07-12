@@ -19,62 +19,142 @@
 package com.tidesdb;
 
 /**
- * Exception thrown by TidesDB operations.
+ * Checked exception thrown by TidesDB native operations. Each exception carries
+ * an integer error code corresponding to a TidesDB status. Use {@link #getErrorCode()}
+ * to retrieve the numeric code and {@link #getErrorMessage()} for a human-readable
+ * description.
  */
 public class TidesDBException extends Exception {
     
+    /**
+     * The error code.
+     */
     private final int errorCode;
     
     /**
-     * Error codes from TidesDB.
+     * Error codes returned by the native TidesDB library.
      */
     public static final int ERR_SUCCESS = 0;
+
+    /**
+     * Memory allocation failure.
+     */
     public static final int ERR_MEMORY = 1;
+
+    /**
+     * Invalid arguments passed to a native operation.
+     */
     public static final int ERR_INVALID_ARGS = 2;
+
+    /**
+     * Requested entry not found.
+     */
     public static final int ERR_NOT_FOUND = 3;
+
+    /**
+     * I/O error during a native operation.
+     */
     public static final int ERR_IO = 4;
+
+    /**
+     * Data corruption detected.
+     */
     public static final int ERR_CORRUPTION = 5;
+
+    /**
+     * Entry already exists.
+     */
     public static final int ERR_EXISTS = 6;
+
+    /**
+     * Transaction conflict.
+     */
     public static final int ERR_CONFLICT = 7;
+
+    /**
+     * Key or value exceeds size limits.
+     */
     public static final int ERR_TOO_LARGE = 8;
+
+    /**
+     * Memory limit exceeded.
+     */
     public static final int ERR_MEMORY_LIMIT = 9;
+
+    /**
+     * Invalid database handle.
+     */
     public static final int ERR_INVALID_DB = 10;
+
+    /**
+     * Unknown error.
+     */
     public static final int ERR_UNKNOWN = 11;
+
+    /**
+     * Database is locked by another process.
+     */
     public static final int ERR_LOCKED = 12;
     
+    /**
+     * Creates an exception with a message and an unknown error code.
+     *
+     * @param message the detail message
+     */
     public TidesDBException(String message) {
         super(message);
         this.errorCode = ERR_UNKNOWN;
     }
     
+    /**
+     * Creates an exception with a message and a specific error code.
+     *
+     * @param message the detail message
+     * @param errorCode the TidesDB error code
+     */
     public TidesDBException(String message, int errorCode) {
         super(message);
         this.errorCode = errorCode;
     }
     
+    /**
+     * Creates an exception with a message and a cause, using an unknown
+     * error code.
+     *
+     * @param message the detail message
+     * @param cause the underlying cause
+     */
     public TidesDBException(String message, Throwable cause) {
         super(message, cause);
         this.errorCode = ERR_UNKNOWN;
     }
     
+    /**
+     * Creates an exception with a message, error code, and cause.
+     *
+     * @param message the detail message
+     * @param errorCode the TidesDB error code
+     * @param cause the underlying cause
+     */
     public TidesDBException(String message, int errorCode, Throwable cause) {
         super(message, cause);
         this.errorCode = errorCode;
     }
     
     /**
-     * Gets the error code.
+     * Returns the TidesDB error code.
      *
-     * @return the error code
+     * @return one of the {@code ERR_*} constants defined in this class
      */
     public int getErrorCode() {
         return errorCode;
     }
     
     /**
-     * Returns a human-readable error message for the error code.
+     * Returns a human-readable description of the error code. The mapping is
+     * local to this class and does not invoke any native method.
      *
-     * @return error message
+     * @return the error description
      */
     public String getErrorMessage() {
         switch (errorCode) {

@@ -27,6 +27,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -2028,6 +2030,320 @@ public class TidesDBTest {
                 assertThrows(TidesDBException.class, () -> TidesDB.open(config));
             assertTrue(ex.getMessage().toLowerCase().contains("s3"),
                 "exception should explain S3 is unavailable, was: " + ex.getMessage());
+        }
+    }
+
+    @Test
+    @Order(57)
+    void testCommitHookReplaceAndVerify() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_hook_replace").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            List<CommitOp[]> receivedA = new ArrayList<>();
+
+            cf.setCommitHook((ops, commitSeq) -> {
+                receivedA.add(ops);
+                return 0;
+            });
+
+            // Commit first put -- hookA should fire
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "keyA".getBytes(StandardCharsets.UTF_8),
+                            "valueA".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+
+            assertEquals(1, receivedA.size());
+            assertEquals(1, receivedA.get(0).length);
+            assertArrayEquals("keyA".getBytes(StandardCharsets.UTF_8),
+                receivedA.get(0)[0].getKey());
+            assertArrayEquals("valueA".getBytes(StandardCharsets.UTF_8),
+                receivedA.get(0)[0].getValue());
+
+            // Replace with a second hook
+            List<CommitOp[]> receivedB = new ArrayList<>();
+
+            cf.setCommitHook((ops, commitSeq) -> {
+                receivedB.add(ops);
+                return 0;
+            });
+
+            // Commit second put -- hookB should fire, hookA should NOT fire again
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "keyB".getBytes(StandardCharsets.UTF_8),
+                            "valueB".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+
+            assertEquals(1, receivedA.size(),
+                "Old hook should not fire again after replacement");
+            assertEquals(1, receivedB.size());
+            assertEquals(1, receivedB.get(0).length);
+            assertArrayEquals("keyB".getBytes(StandardCharsets.UTF_8),
+                receivedB.get(0)[0].getKey());
+            assertArrayEquals("valueB".getBytes(StandardCharsets.UTF_8),
+                receivedB.get(0)[0].getValue());
+
+            cf.clearCommitHook();
+        }
+    }
+
+    @Test
+    @Order(58)
+    void testCommitHookOldHookSurvivesFailure() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_hook_survive").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            List<CommitOp[]> receivedA = new ArrayList<>();
+
+            cf.setCommitHook((ops, commitSeq) -> {
+                receivedA.add(ops);
+                return 0;
+            });
+
+            // Commit a put -- hookA fires
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "key1".getBytes(StandardCharsets.UTF_8),
+                            "value1".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+            assertEquals(1, receivedA.size());
+
+            // Clear the hook
+            cf.clearCommitHook();
+
+            // Commit another put -- hookA should NOT fire
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "key2".getBytes(StandardCharsets.UTF_8),
+                            "value2".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+            assertEquals(1, receivedA.size(),
+                "Hook should not fire after clearing");
+
+            // Re-register hookA
+            cf.setCommitHook((ops, commitSeq) -> {
+                receivedA.add(ops);
+                return 0;
+            });
+
+            // Commit a third put -- re-registered hook should fire
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "key3".getBytes(StandardCharsets.UTF_8),
+                            "value3".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+            assertEquals(2, receivedA.size(),
+                "Re-registered hook should fire");
+            assertEquals(1, receivedA.get(1).length);
+            assertArrayEquals("key3".getBytes(StandardCharsets.UTF_8),
+                receivedA.get(1)[0].getKey());
+
+            cf.clearCommitHook();
+        }
+    }
+
+    @Test
+    @Order(59)
+    void testCommitHookConcurrentReplaceAndCommit() throws TidesDBException, InterruptedException {
+        Config config = Config.builder(tempDir.resolve("testdb_hook_concurrent").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            AtomicInteger hookCounter = new AtomicInteger(0);
+            CountDownLatch startLatch = new CountDownLatch(1);
+            CountDownLatch stopLatch = new CountDownLatch(1);
+
+            // Set an initial hook
+            cf.setCommitHook((ops, commitSeq) -> {
+                hookCounter.incrementAndGet();
+                return 0;
+            });
+
+            // Writer threads that commit puts in a loop
+            int numWriters = 4;
+            Thread[] writers = new Thread[numWriters];
+            for (int w = 0; w < numWriters; w++) {
+                final int writerId = w;
+                writers[w] = new Thread(() -> {
+                    try {
+                        startLatch.await();
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    while (stopLatch.getCount() > 0) {
+                        try {
+                            try (Transaction txn = db.beginTransaction()) {
+                                byte[] key = ("concurrent_key_" + writerId + "_" +
+                                    System.nanoTime()).getBytes(StandardCharsets.UTF_8);
+                                txn.put(cf, key, "value".getBytes(StandardCharsets.UTF_8));
+                                txn.commit();
+                            }
+                        } catch (TidesDBException e) {
+                            // Expected during hook transitions
+                        } catch (IllegalStateException e) {
+                            // May occur if db is being closed
+                            break;
+                        }
+                    }
+                });
+                writers[w].setDaemon(true);
+                writers[w].start();
+            }
+
+            // Replacer thread that alternates set and clear hook
+            Thread replacer = new Thread(() -> {
+                try {
+                    startLatch.await();
+                } catch (InterruptedException e) {
+                    return;
+                }
+                for (int i = 0; i < 100 && stopLatch.getCount() > 0; i++) {
+                    try {
+                        if (i % 2 == 0) {
+                            cf.setCommitHook((ops, commitSeq) -> {
+                                hookCounter.incrementAndGet();
+                                return 0;
+                            });
+                        } else {
+                            cf.clearCommitHook();
+                        }
+                    } catch (TidesDBException e) {
+                        // Expected during transitions
+                    } catch (IllegalStateException e) {
+                        break;
+                    }
+                }
+            });
+            replacer.setDaemon(true);
+            replacer.start();
+
+            // Start all threads
+            startLatch.countDown();
+
+            // Let them run for 3 seconds
+            Thread.sleep(3000);
+
+            // Signal stop
+            stopLatch.countDown();
+
+            // Wait for threads to finish
+            for (Thread w : writers) {
+                w.join(5000);
+            }
+            replacer.join(5000);
+
+            // No crash occurred -- verify final hook state is coherent
+            // Do a final commit to verify no crash
+            try {
+                cf.setCommitHook((ops, commitSeq) -> {
+                    hookCounter.incrementAndGet();
+                    return 0;
+                });
+
+                try (Transaction txn = db.beginTransaction()) {
+                    txn.put(cf, "final_key".getBytes(StandardCharsets.UTF_8),
+                                "final_value".getBytes(StandardCharsets.UTF_8));
+                    txn.commit();
+                }
+
+                assertTrue(hookCounter.get() > 0,
+                    "At least one hook invocation should have occurred");
+
+                cf.clearCommitHook();
+            } catch (TidesDBException e) {
+                fail("Final commit after concurrent stress should not throw: " + e.getMessage());
+            }
+        }
+    }
+
+    @Test
+    @Order(60)
+    void testCommitHookRepeatedTransitions() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_hook_transitions").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            final int iterations = 50;
+
+            for (int i = 0; i < iterations; i++) {
+                List<CommitOp[]> received = new ArrayList<>();
+
+                cf.setCommitHook((ops, commitSeq) -> {
+                    received.add(ops);
+                    return 0;
+                });
+
+                // Commit with hook active -- hook should fire
+                try (Transaction txn = db.beginTransaction()) {
+                    byte[] key = ("key_set_" + i).getBytes(StandardCharsets.UTF_8);
+                    byte[] value = ("value_set_" + i).getBytes(StandardCharsets.UTF_8);
+                    txn.put(cf, key, value);
+                    txn.commit();
+                }
+
+                assertEquals(1, received.size(),
+                    "Hook should fire at iteration " + i);
+                assertArrayEquals(("key_set_" + i).getBytes(StandardCharsets.UTF_8),
+                    received.get(0)[0].getKey());
+
+                // Clear the hook
+                cf.clearCommitHook();
+
+                // Commit with hook cleared -- hook should NOT fire
+                received.clear();
+                try (Transaction txn = db.beginTransaction()) {
+                    byte[] key = ("key_clear_" + i).getBytes(StandardCharsets.UTF_8);
+                    byte[] value = ("value_clear_" + i).getBytes(StandardCharsets.UTF_8);
+                    txn.put(cf, key, value);
+                    txn.commit();
+                }
+
+                assertEquals(0, received.size(),
+                    "Hook should not fire after clearing at iteration " + i);
+            }
         }
     }
 }

@@ -19,7 +19,13 @@
 package com.tidesdb;
 
 /**
- * Statistics about a column family.
+ * Statistics about a column family, including level structure, memtable size,
+ * and the active configuration. Created by the native library and returned
+ * from {@link ColumnFamily#getStats()}.
+ *
+ * <p>The arrays returned by {@link #getLevelSizes()} and
+ * {@link #getLevelNumSSTables()} are the internal stored references, not
+ * defensive copies. Callers must not modify them.
  */
 public class Stats {
 
@@ -52,6 +58,39 @@ public class Stats {
     private final long flushCount;
     private final long compactionCount;
 
+    /**
+     * Creates a new {@code Stats} instance. Typically called by the JNI
+     * bridge rather than application code.
+     *
+     * @param numLevels the number of LSM levels
+     * @param memtableSize the current memtable size in bytes
+     * @param levelSizes the size in bytes for each level (stored by reference)
+     * @param levelNumSSTables the SSTable count for each level (stored by reference)
+     * @param config the column family configuration
+     * @param totalKeys total number of keys across memtable and all SSTables
+     * @param totalDataSize total data size (klog + vlog) across all SSTables
+     * @param avgKeySize average key size in bytes
+     * @param avgValueSize average value size in bytes
+     * @param levelKeyCounts number of keys per level
+     * @param readAmp read amplification (point lookup cost multiplier)
+     * @param hitRate cache hit rate (0.0 to 1.0)
+     * @param useBtree whether this column family uses B+tree format
+     * @param btreeTotalNodes total number of B+tree nodes across all SSTables
+     * @param btreeMaxHeight maximum B+tree height across all SSTables
+     * @param btreeAvgHeight average B+tree height across all SSTables
+     * @param totalTombstones total number of tombstones across every SSTable
+     * @param tombstoneRatio tombstone ratio (totalTombstones / totalKeys)
+     * @param levelTombstoneCounts per-level tombstone counts
+     * @param maxSstDensity worst per-SSTable tombstone density
+     * @param maxSstDensityLevel 1-based level index where worst density was observed
+     * @param walBytesWritten framed bytes appended to WAL (lifetime since open)
+     * @param flushBytesWritten on-disk bytes flushes wrote to L0 SSTables
+     * @param compactionBytesWritten on-disk bytes compactions wrote
+     * @param compactionBytesRead on-disk bytes compactions read as input
+     * @param userBytesWritten logical key+value bytes committed
+     * @param flushCount number of flushed SSTables produced
+     * @param compactionCount number of compaction output SSTables produced
+     */
     public Stats(int numLevels, long memtableSize, long[] levelSizes, int[] levelNumSSTables,
                  ColumnFamilyConfig config, long totalKeys, long totalDataSize,
                  double avgKeySize, double avgValueSize, long[] levelKeyCounts,
@@ -93,7 +132,7 @@ public class Stats {
     }
 
     /**
-     * Gets the number of levels.
+     * Returns the number of LSM levels.
      *
      * @return the number of levels
      */
@@ -102,36 +141,43 @@ public class Stats {
     }
 
     /**
-     * Gets the memtable size in bytes.
+     * Returns the current memtable size in bytes.
      *
-     * @return the memtable size
+     * @return the memtable size in bytes
      */
     public long getMemtableSize() {
         return memtableSize;
     }
 
     /**
-     * Gets the sizes of each level in bytes.
+     * Returns the sizes of each LSM level in bytes.
      *
-     * @return array of level sizes
+     * <p>The returned array is the stored internal reference, not a
+     * defensive copy. Callers must not modify it.
+     *
+     * @return the level sizes in bytes (internal reference)
      */
     public long[] getLevelSizes() {
         return levelSizes;
     }
 
     /**
-     * Gets the number of SSTables at each level.
+     * Returns the number of SSTables at each LSM level.
      *
-     * @return array of SSTable counts per level
+     * <p>The returned array is the stored internal reference, not a
+     * defensive copy. Callers must not modify it.
+     *
+     * @return the SSTable counts per level (internal reference)
      */
     public int[] getLevelNumSSTables() {
         return levelNumSSTables;
     }
 
     /**
-     * Gets the column family configuration.
+     * Returns the column family configuration active when these statistics
+     * were captured.
      *
-     * @return the configuration
+     * @return the configuration, never {@code null}
      */
     public ColumnFamilyConfig getConfig() {
         return config;

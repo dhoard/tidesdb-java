@@ -19,11 +19,26 @@
 package com.tidesdb;
 
 /**
- * Sync mode for durability.
+ * Sync mode for durability control. Each constant maps to an integer used by
+ * the JNI bridge.
  */
 public enum SyncMode {
+
+    /**
+     * No synchronous writes; fastest, but uncommitted data may be lost on
+     * crash.
+     */
     SYNC_NONE(0),
+
+    /**
+     * Synchronous writes on every operation; slowest, but most durable.
+     */
     SYNC_FULL(1),
+
+    /**
+     * Synchronous writes at a configured interval (see
+     * {@code syncIntervalUs} in {@link ColumnFamilyConfig}).
+     */
     SYNC_INTERVAL(2);
     
     private final int value;
@@ -32,10 +47,24 @@ public enum SyncMode {
         this.value = value;
     }
     
+    /**
+     * Returns the JNI numeric mapping for this sync mode.
+     *
+     * @return the integer value passed to the native library
+     */
     public int getValue() {
         return value;
     }
     
+    /**
+     * Returns the {@link SyncMode} constant matching the given JNI integer
+     * value.
+     *
+     * @param value the JNI integer value
+     * @return the matching constant
+     * @throws IllegalArgumentException if {@code value} does not map to any
+     *         known constant
+     */
     public static SyncMode fromValue(int value) {
         for (SyncMode mode : values()) {
             if (mode.value == value) {

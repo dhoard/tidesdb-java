@@ -21,8 +21,17 @@ package com.tidesdb;
 import java.io.Closeable;
 
 /**
- * TidesDB is the main database class providing access to TidesDB functionality.
- * This class wraps the native TidesDB library through JNI.
+ * Main entry point for a TidesDB database. This class wraps the native TidesDB
+ * library through JNI and owns the underlying database handle.
+ *
+ * <p>{@code TidesDB} implements {@link java.io.Closeable} and should be used with
+ * try-with-resources. Callers must close any {@link TidesDBIterator} and
+ * {@link Transaction} instances before closing the database. Closing an already-closed
+ * instance is a no-op.
+ *
+ * <p>Operations on a closed instance throw {@link IllegalStateException}.
+ *
+ * <p>This class is not guaranteed to be thread-safe.
  */
 public class TidesDB implements Closeable {
     
@@ -40,9 +49,11 @@ public class TidesDB implements Closeable {
     /**
      * Opens a TidesDB instance with the given configuration.
      *
-     * @param config the database configuration
+     * @param config the database configuration; must not be {@code null}
      * @return a new TidesDB instance
-     * @throws TidesDBException if the database cannot be opened
+     * @throws IllegalArgumentException if {@code config} is {@code null} or its
+     *         {@code dbPath} is {@code null} or empty
+     * @throws TidesDBException if the native database cannot be opened
      */
     public static TidesDB open(Config config) throws TidesDBException {
         if (config == null) {
@@ -129,7 +140,13 @@ public class TidesDB implements Closeable {
     }
     
     /**
-     * Closes the database instance and releases all resources.
+     * Closes the database and releases all native resources.
+     *
+     * <p>This method is idempotent; subsequent calls are no-ops. After closing,
+     * all other operations on this instance throw {@link IllegalStateException}.
+     *
+     * <p>Callers should close all {@link TidesDBIterator} and {@link Transaction}
+     * instances before calling this method.
      */
     @Override
     public void close() {
@@ -143,9 +160,12 @@ public class TidesDB implements Closeable {
     /**
      * Creates a new column family with the given configuration.
      *
-     * @param name the column family name
-     * @param config the column family configuration
-     * @throws TidesDBException if the column family cannot be created
+     * @param name the column family name; must not be {@code null} or empty
+     * @param config the column family configuration; must not be {@code null}
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty,
+     *         or {@code config} is {@code null}
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native column family cannot be created
      */
     public void createColumnFamily(String name, ColumnFamilyConfig config) throws TidesDBException {
         checkNotClosed();
@@ -188,8 +208,10 @@ public class TidesDB implements Closeable {
     /**
      * Drops a column family and all associated data.
      *
-     * @param name the column family name
-     * @throws TidesDBException if the column family cannot be dropped
+     * @param name the column family name; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native column family cannot be dropped
      */
     public void dropColumnFamily(String name) throws TidesDBException {
         checkNotClosed();
@@ -202,9 +224,12 @@ public class TidesDB implements Closeable {
     /**
      * Retrieves a column family by name.
      *
-     * @param name the column family name
-     * @return the column family
-     * @throws TidesDBException if the column family is not found
+     * @param name the column family name; must not be {@code null} or empty
+     * @return the column family handle
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the column family is not found or a native
+     *         error occurs
      */
     public ColumnFamily getColumnFamily(String name) throws TidesDBException {
         checkNotClosed();
@@ -218,8 +243,9 @@ public class TidesDB implements Closeable {
     /**
      * Lists all column families in the database.
      *
-     * @return array of column family names
-     * @throws TidesDBException if the list cannot be retrieved
+     * @return array of column family names, never {@code null}
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native list operation fails
      */
     public String[] listColumnFamilies() throws TidesDBException {
         checkNotClosed();
@@ -227,10 +253,13 @@ public class TidesDB implements Closeable {
     }
     
     /**
-     * Begins a new transaction with default isolation level.
+     * Begins a new transaction with the default isolation level.
+     *
+     * <p>Close the returned transaction before closing this database.
      *
      * @return a new transaction
-     * @throws TidesDBException if the transaction cannot be started
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native transaction cannot be started
      */
     public Transaction beginTransaction() throws TidesDBException {
         checkNotClosed();
@@ -241,9 +270,13 @@ public class TidesDB implements Closeable {
     /**
      * Begins a new transaction with the specified isolation level.
      *
-     * @param isolationLevel the isolation level
+     * <p>Close the returned transaction before closing this database.
+     *
+     * @param isolationLevel the isolation level; must not be {@code null}
      * @return a new transaction
-     * @throws TidesDBException if the transaction cannot be started
+     * @throws IllegalArgumentException if {@code isolationLevel} is {@code null}
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native transaction cannot be started
      */
     public Transaction beginTransaction(IsolationLevel isolationLevel) throws TidesDBException {
         checkNotClosed();
@@ -257,8 +290,9 @@ public class TidesDB implements Closeable {
     /**
      * Retrieves statistics about the block cache.
      *
-     * @return cache statistics
-     * @throws TidesDBException if the stats cannot be retrieved
+     * @return cache statistics, never {@code null}
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native stats retrieval fails
      */
     public CacheStats getCacheStats() throws TidesDBException {
         checkNotClosed();
@@ -268,9 +302,11 @@ public class TidesDB implements Closeable {
     /**
      * Registers a custom comparator with the database.
      *
-     * @param name the comparator name
-     * @param context optional context string
-     * @throws TidesDBException if the comparator cannot be registered
+     * @param name the comparator name; must not be {@code null} or empty
+     * @param context optional context string, may be {@code null}
+     * @throws IllegalArgumentException if {@code name} is {@code null} or empty
+     * @throws IllegalStateException if this database is closed
+     * @throws TidesDBException if the native comparator registration fails
      */
     public void registerComparator(String name, String context) throws TidesDBException {
         checkNotClosed();

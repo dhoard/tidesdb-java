@@ -19,7 +19,8 @@
 package com.tidesdb;
 
 /**
- * Statistics about the block cache.
+ * Statistics about the block cache in a {@link TidesDB} instance. Created by
+ * the native library and returned from {@link TidesDB#getCacheStats()}.
  */
 public class CacheStats {
     
@@ -31,6 +32,18 @@ public class CacheStats {
     private final double hitRate;
     private final long numPartitions;
     
+    /**
+     * Creates a new {@code CacheStats} instance. Typically called by the JNI
+     * bridge rather than application code.
+     *
+     * @param enabled whether the cache is enabled
+     * @param totalEntries the total number of cache entries
+     * @param totalBytes the total bytes used by the cache
+     * @param hits the number of cache hits
+     * @param misses the number of cache misses
+     * @param hitRate the cache hit rate (0.0 to 1.0)
+     * @param numPartitions the number of cache partitions
+     */
     public CacheStats(boolean enabled, long totalEntries, long totalBytes, long hits, long misses, double hitRate, long numPartitions) {
         this.enabled = enabled;
         this.totalEntries = totalEntries;
@@ -42,63 +55,63 @@ public class CacheStats {
     }
     
     /**
-     * Returns whether the cache is enabled.
+     * Returns whether the block cache is enabled.
      *
-     * @return true if enabled
+     * @return {@code true} if the cache is enabled
      */
     public boolean isEnabled() {
         return enabled;
     }
     
     /**
-     * Gets the total number of entries in the cache.
+     * Returns the total number of entries currently in the cache.
      *
-     * @return total entries
+     * @return the total entry count
      */
     public long getTotalEntries() {
         return totalEntries;
     }
     
     /**
-     * Gets the total bytes used by the cache.
+     * Returns the total bytes used by the cache.
      *
-     * @return total bytes
+     * @return the total bytes
      */
     public long getTotalBytes() {
         return totalBytes;
     }
     
     /**
-     * Gets the number of cache hits.
+     * Returns the cumulative number of cache hits.
      *
-     * @return cache hits
+     * @return the cache hit count
      */
     public long getHits() {
         return hits;
     }
     
     /**
-     * Gets the number of cache misses.
+     * Returns the cumulative number of cache misses.
      *
-     * @return cache misses
+     * @return the cache miss count
      */
     public long getMisses() {
         return misses;
     }
     
     /**
-     * Gets the cache hit rate.
+     * Returns the cache hit rate.
      *
-     * @return hit rate (0.0 to 1.0)
+     * @return the hit rate, typically in the range 0.0 to 1.0
      */
     public double getHitRate() {
         return hitRate;
     }
     
     /**
-     * Gets the number of cache partitions.
+     * Returns the number of cache partitions.
      *
-     * @return number of partitions
+     * @return the partition count
      */
     public long getNumPartitions() {
         return numPartitions;

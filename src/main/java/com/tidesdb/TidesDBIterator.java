@@ -22,7 +22,15 @@ import java.io.Closeable;
 
 /**
  * Iterator for traversing key-value pairs in a column family.
- * Provides efficient bidirectional traversal.
+ * Provides efficient bidirectional traversal over the underlying storage.
+ *
+ * <p>{@code TidesDBIterator} implements {@link java.io.Closeable} for use with
+ * try-with-resources. Close iterators before the owning {@link Transaction} is
+ * freed. After this iterator is freed, all operations except {@link #isValid()}
+ * and {@code close()} throw {@link IllegalStateException}. The {@link #isValid()}
+ * method returns {@code false} on a freed iterator.
+ *
+ * <p>This class is not guaranteed to be thread-safe.
  */
 public class TidesDBIterator implements Closeable {
     
@@ -40,7 +48,8 @@ public class TidesDBIterator implements Closeable {
     /**
      * Positions the iterator at the first key.
      *
-     * @throws TidesDBException if the seek fails
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native seek fails
      */
     public void seekToFirst() throws TidesDBException {
         checkNotFreed();
@@ -50,7 +59,8 @@ public class TidesDBIterator implements Closeable {
     /**
      * Positions the iterator at the last key.
      *
-     * @throws TidesDBException if the seek fails
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native seek fails
      */
     public void seekToLast() throws TidesDBException {
         checkNotFreed();
@@ -58,10 +68,13 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
-     * Positions the iterator at the first key >= target key.
+     * Positions the iterator at the first key greater than or equal to the
+     * target key.
      *
-     * @param key the target key
-     * @throws TidesDBException if the seek fails
+     * @param key the target key; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code key} is {@code null} or empty
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native seek fails
      */
     public void seek(byte[] key) throws TidesDBException {
         checkNotFreed();
@@ -72,10 +85,13 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
-     * Positions the iterator at the last key {@code <=} target key.
+     * Positions the iterator at the last key less than or equal to the target
+     * key.
      *
-     * @param key the target key
-     * @throws TidesDBException if the seek fails
+     * @param key the target key; must not be {@code null} or empty
+     * @throws IllegalArgumentException if {@code key} is {@code null} or empty
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native seek fails
      */
     public void seekForPrev(byte[] key) throws TidesDBException {
         checkNotFreed();
@@ -86,9 +102,12 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
-     * Returns true if the iterator is positioned at a valid entry.
+     * Returns whether the iterator is positioned at a valid entry.
      *
-     * @return true if valid
+     * <p>Returns {@code false} if this iterator has been freed, without
+     * throwing an exception.
+     *
+     * @return {@code true} if the iterator is at a valid entry
      */
     public boolean isValid() {
         if (freed) {
@@ -100,7 +119,8 @@ public class TidesDBIterator implements Closeable {
     /**
      * Moves the iterator to the next entry.
      *
-     * @throws TidesDBException if the move fails
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native next operation fails
      */
     public void next() throws TidesDBException {
         checkNotFreed();
@@ -110,7 +130,8 @@ public class TidesDBIterator implements Closeable {
     /**
      * Moves the iterator to the previous entry.
      *
-     * @throws TidesDBException if the move fails
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native prev operation fails
      */
     public void prev() throws TidesDBException {
         checkNotFreed();
@@ -118,10 +139,11 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
-     * Retrieves the current key from the iterator.
+     * Retrieves the key at the current iterator position.
      *
      * @return the current key
-     * @throws TidesDBException if the key cannot be retrieved
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native key retrieval fails
      */
     public byte[] key() throws TidesDBException {
         checkNotFreed();
@@ -129,10 +151,11 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
-     * Retrieves the current value from the iterator.
+     * Retrieves the value at the current iterator position.
      *
      * @return the current value
-     * @throws TidesDBException if the value cannot be retrieved
+     * @throws IllegalStateException if this iterator is freed
+     * @throws TidesDBException if the native value retrieval fails
      */
     public byte[] value() throws TidesDBException {
         checkNotFreed();
@@ -153,7 +176,10 @@ public class TidesDBIterator implements Closeable {
     }
 
     /**
-     * Frees the iterator resources.
+     * Frees the iterator and releases all native resources.
+     *
+     * <p>This method is idempotent; subsequent calls are no-ops. After freeing,
+     * all operations except {@link #isValid()} throw {@link IllegalStateException}.
      */
     public void free() {
         if (!freed && nativeHandle != 0) {
@@ -164,7 +190,7 @@ public class TidesDBIterator implements Closeable {
     }
     
     /**
-     * Closes the iterator (same as free).
+     * Closes this iterator. Equivalent to {@link #free()}.
      */
     @Override
     public void close() {

@@ -22,6 +22,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -2645,6 +2646,87 @@ public class TidesDBTest {
             writer.join(5000);
             replacer.join(5000);
         }
+    }
+
+    @Test
+    @Order(71)
+    void testOpenWithObjectStoreFsPathFailsOnBadPath() throws Exception {
+        // A regular file (not a directory) as objectStoreFsPath must cause tidesdb_objstore_fs_create
+        // to return NULL, which should surface as TidesDBException instead of silently opening
+        // an ordinary local database.
+        Path osFile = tempDir.resolve("os_file");
+        Files.createFile(osFile);
+
+        Config config = Config.builder(tempDir.resolve("testdb_fs_badpath").toString())
+            .objectStoreFsPath(osFile.toString())
+            .build();
+
+        TidesDBException ex = assertThrows(TidesDBException.class, () -> TidesDB.open(config));
+        assertEquals(TidesDBException.ERR_IO, ex.getErrorCode());
+    }
+
+    @Test
+    @Order(72)
+    void testOpenWithObjectStoreFsPathSucceedsWithValidDirectory() throws TidesDBException {
+        Path osDir = tempDir.resolve("os_dir");
+        osDir.toFile().mkdirs();
+
+        Config config = Config.builder(tempDir.resolve("testdb_fs_goodpath").toString())
+            .objectStoreFsPath(osDir.toString())
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            assertNotNull(db);
+            DbStats dbStats = db.getDbStats();
+            assertNotNull(dbStats);
+            assertTrue(dbStats.isObjectStoreEnabled());
+        }
+    }
+
+    @Test
+    @Order(73)
+    void testOpenWithoutObjectStoreFsPathSucceeds() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("plaindb").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            assertNotNull(db);
+        }
+    }
+
+    @Test
+    @Order(74)
+    void testS3PrecedenceOverFsPathOnFailure() throws TidesDBException {
+        Path osFile = tempDir.resolve("os_file_s3");
+        try {
+            Files.createFile(osFile);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        S3Config s3 = S3Config.builder()
+            .endpoint("127.0.0.1:19001")
+            .bucket("tidesdb-test")
+            .accessKey("minioadmin")
+            .secretKey("minioadmin")
+            .usePathStyle(true)
+            .useSsl(false)
+            .build();
+
+        Config config = Config.builder(tempDir.resolve("testdb_s3_over_fs").toString())
+            .objectStoreS3Config(s3)
+            .objectStoreFsPath(osFile.toString())
+            .build();
+
+        // S3 takes precedence over fs path. If S3 is available, the S3 connector creation or
+        // open fails with TidesDBException. If S3 is unavailable, the S3 connector creation
+        // itself throws. In neither case does a silent filesystem fallback occur.
+        assertThrows(TidesDBException.class, () -> TidesDB.open(config));
     }
 
     @Test

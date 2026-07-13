@@ -25,6 +25,13 @@
 #include <dlfcn.h>
 #endif
 
+#ifndef JSIZE_MAX
+#define JSIZE_MAX (((jsize)~0) >> 1)
+#endif
+
+/* Forward declaration */
+static jobject buildCfConfigObject(JNIEnv *env, const tidesdb_column_family_config_t *cfg);
+
 /* ABI-compatible overlay for tidesdb_objstore_t.
  * The FFI header (db.h) defines this type as opaque. The real layout is published
  * in tidesdb/objstore.h and is part of the stable library ABI. This overlay lets
@@ -64,6 +71,11 @@ static void throwTidesDBException(JNIEnv *env, int errorCode, const char *messag
     jthrowable exception =
         (jthrowable)(*env)->NewObject(env, exClass, constructor, jMessage, errorCode);
     (*env)->Throw(env, exception);
+}
+
+static int jvm_exception_pending(JNIEnv *env)
+{
+    return (*env)->ExceptionCheck(env) == JNI_TRUE;
 }
 
 static const char *getErrorMessage(int code)
@@ -134,6 +146,14 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
     else if (objectStoreFsPath != NULL)
     {
         fs_path = (*env)->GetStringUTFChars(env, objectStoreFsPath, NULL);
+        if (objectStoreFsPath != NULL && fs_path == NULL)
+        {
+            (*env)->ReleaseStringUTFChars(env, dbPath, path);
+            if (!jvm_exception_pending(env))
+                throwTidesDBException(env, TDB_ERR_MEMORY,
+                                      "Failed to get object store filesystem path");
+            return 0;
+        }
         if (fs_path != NULL)
         {
             obj_store = tidesdb_objstore_fs_create(fs_path);
@@ -145,6 +165,14 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
     if (oscLocalCachePath != NULL)
     {
         cache_path = (*env)->GetStringUTFChars(env, oscLocalCachePath, NULL);
+        if (oscLocalCachePath != NULL && cache_path == NULL)
+        {
+            if (fs_path != NULL) (*env)->ReleaseStringUTFChars(env, objectStoreFsPath, fs_path);
+            (*env)->ReleaseStringUTFChars(env, dbPath, path);
+            if (!jvm_exception_pending(env))
+                throwTidesDBException(env, TDB_ERR_MEMORY, "Failed to get local cache path");
+            return 0;
+        }
     }
 
     tidesdb_objstore_config_t os_cfg = {
@@ -262,15 +290,67 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeObjstoreS3Create(
         return 0;
     }
 
-    /* required strings */
+    /* required strings with NULL checks */
     const char *c_endpoint = endpoint ? (*env)->GetStringUTFChars(env, endpoint, NULL) : NULL;
+    if (endpoint != NULL && c_endpoint == NULL) return 0;
+
     const char *c_bucket = bucket ? (*env)->GetStringUTFChars(env, bucket, NULL) : NULL;
+    if (bucket != NULL && c_bucket == NULL)
+    {
+        if (c_endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+        return 0;
+    }
+
     const char *c_access = accessKey ? (*env)->GetStringUTFChars(env, accessKey, NULL) : NULL;
+    if (accessKey != NULL && c_access == NULL)
+    {
+        if (c_endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+        if (c_bucket) (*env)->ReleaseStringUTFChars(env, bucket, c_bucket);
+        return 0;
+    }
+
     const char *c_secret = secretKey ? (*env)->GetStringUTFChars(env, secretKey, NULL) : NULL;
+    if (secretKey != NULL && c_secret == NULL)
+    {
+        if (c_endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+        if (c_bucket) (*env)->ReleaseStringUTFChars(env, bucket, c_bucket);
+        if (c_access) (*env)->ReleaseStringUTFChars(env, accessKey, c_access);
+        return 0;
+    }
+
     /* optional strings */
     const char *c_prefix = prefix ? (*env)->GetStringUTFChars(env, prefix, NULL) : NULL;
+    if (prefix != NULL && c_prefix == NULL)
+    {
+        if (c_endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+        if (c_bucket) (*env)->ReleaseStringUTFChars(env, bucket, c_bucket);
+        if (c_access) (*env)->ReleaseStringUTFChars(env, accessKey, c_access);
+        if (c_secret) (*env)->ReleaseStringUTFChars(env, secretKey, c_secret);
+        return 0;
+    }
+
     const char *c_region = region ? (*env)->GetStringUTFChars(env, region, NULL) : NULL;
+    if (region != NULL && c_region == NULL)
+    {
+        if (c_endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+        if (c_bucket) (*env)->ReleaseStringUTFChars(env, bucket, c_bucket);
+        if (c_access) (*env)->ReleaseStringUTFChars(env, accessKey, c_access);
+        if (c_secret) (*env)->ReleaseStringUTFChars(env, secretKey, c_secret);
+        if (c_prefix) (*env)->ReleaseStringUTFChars(env, prefix, c_prefix);
+        return 0;
+    }
+
     const char *c_ca = tlsCaPath ? (*env)->GetStringUTFChars(env, tlsCaPath, NULL) : NULL;
+    if (tlsCaPath != NULL && c_ca == NULL)
+    {
+        if (c_endpoint) (*env)->ReleaseStringUTFChars(env, endpoint, c_endpoint);
+        if (c_bucket) (*env)->ReleaseStringUTFChars(env, bucket, c_bucket);
+        if (c_access) (*env)->ReleaseStringUTFChars(env, accessKey, c_access);
+        if (c_secret) (*env)->ReleaseStringUTFChars(env, secretKey, c_secret);
+        if (c_prefix) (*env)->ReleaseStringUTFChars(env, prefix, c_prefix);
+        if (c_region) (*env)->ReleaseStringUTFChars(env, region, c_region);
+        return 0;
+    }
 
     tidesdb_objstore_s3_config_t cfg = {.endpoint = c_endpoint,
                                         .bucket = c_bucket,
@@ -450,12 +530,33 @@ JNIEXPORT jobjectArray JNICALL Java_com_tidesdb_TidesDB_nativeListColumnFamilies
     }
 
     jclass stringClass = (*env)->FindClass(env, "java/lang/String");
+    if (stringClass == NULL)
+    {
+        for (int i = 0; i < count; i++) free(names[i]);
+        free(names);
+        return NULL;
+    }
+
     jobjectArray array = (*env)->NewObjectArray(env, count, stringClass, NULL);
+    if (array == NULL)
+    {
+        for (int i = 0; i < count; i++) free(names[i]);
+        free(names);
+        return NULL;
+    }
 
     for (int i = 0; i < count; i++)
     {
         jstring str = (*env)->NewStringUTF(env, names[i]);
+        if (str == NULL)
+        {
+            /* OOM: pending JVM exception. Free remaining names and return. */
+            for (int j = i; j < count; j++) free(names[j]);
+            free(names);
+            return NULL;
+        }
         (*env)->SetObjectArrayElement(env, array, i, str);
+        (*env)->DeleteLocalRef(env, str);
         free(names[i]);
     }
     free(names);
@@ -510,7 +611,10 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetCacheStats(JNIEnv *e
     }
 
     jclass cacheStatsClass = (*env)->FindClass(env, "com/tidesdb/CacheStats");
+    if (cacheStatsClass == NULL) return NULL;
+
     jmethodID constructor = (*env)->GetMethodID(env, cacheStatsClass, "<init>", "(ZJJJJDJ)V");
+    if (constructor == NULL) return NULL;
 
     return (*env)->NewObject(env, cacheStatsClass, constructor, stats.enabled != 0,
                              (jlong)stats.total_entries, (jlong)stats.total_bytes,
@@ -670,92 +774,133 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_ColumnFamily_nativeGetStats(JNIEnv *e
     }
 
     jlongArray levelSizes = (*env)->NewLongArray(env, stats->num_levels);
+    if (levelSizes == NULL)
+    {
+        tidesdb_free_stats(stats);
+        return NULL;
+    }
+
+    jlong *sizes = NULL;
     if (stats->level_sizes != NULL)
     {
-        jlong *sizes = malloc(stats->num_levels * sizeof(jlong));
+        sizes = malloc(stats->num_levels * sizeof(jlong));
+        if (sizes == NULL)
+        {
+            tidesdb_free_stats(stats);
+            return NULL;
+        }
         for (int i = 0; i < stats->num_levels; i++)
         {
             sizes[i] = (jlong)stats->level_sizes[i];
         }
         (*env)->SetLongArrayRegion(env, levelSizes, 0, stats->num_levels, sizes);
         free(sizes);
+        sizes = NULL;
     }
 
     jintArray levelNumSSTables = (*env)->NewIntArray(env, stats->num_levels);
+    if (levelNumSSTables == NULL)
+    {
+        tidesdb_free_stats(stats);
+        return NULL;
+    }
+
+    jint *nums = NULL;
     if (stats->level_num_sstables != NULL)
     {
-        jint *nums = malloc(stats->num_levels * sizeof(jint));
+        nums = malloc(stats->num_levels * sizeof(jint));
+        if (nums == NULL)
+        {
+            tidesdb_free_stats(stats);
+            return NULL;
+        }
         for (int i = 0; i < stats->num_levels; i++)
         {
             nums[i] = stats->level_num_sstables[i];
         }
         (*env)->SetIntArrayRegion(env, levelNumSSTables, 0, stats->num_levels, nums);
         free(nums);
+        nums = NULL;
     }
 
     jlongArray levelKeyCounts = (*env)->NewLongArray(env, stats->num_levels);
+    if (levelKeyCounts == NULL)
+    {
+        tidesdb_free_stats(stats);
+        return NULL;
+    }
+
+    jlong *counts = NULL;
     if (stats->level_key_counts != NULL)
     {
-        jlong *counts = malloc(stats->num_levels * sizeof(jlong));
+        counts = malloc(stats->num_levels * sizeof(jlong));
+        if (counts == NULL)
+        {
+            tidesdb_free_stats(stats);
+            return NULL;
+        }
         for (int i = 0; i < stats->num_levels; i++)
         {
             counts[i] = (jlong)stats->level_key_counts[i];
         }
         (*env)->SetLongArrayRegion(env, levelKeyCounts, 0, stats->num_levels, counts);
         free(counts);
+        counts = NULL;
     }
 
     jlongArray levelTombstoneCounts = (*env)->NewLongArray(env, stats->num_levels);
+    if (levelTombstoneCounts == NULL)
+    {
+        tidesdb_free_stats(stats);
+        return NULL;
+    }
+
+    jlong *tombstoneCounts = NULL;
     if (stats->level_tombstone_counts != NULL)
     {
-        jlong *counts = malloc(stats->num_levels * sizeof(jlong));
+        tombstoneCounts = malloc(stats->num_levels * sizeof(jlong));
+        if (tombstoneCounts == NULL)
+        {
+            tidesdb_free_stats(stats);
+            return NULL;
+        }
         for (int i = 0; i < stats->num_levels; i++)
         {
-            counts[i] = (jlong)stats->level_tombstone_counts[i];
+            tombstoneCounts[i] = (jlong)stats->level_tombstone_counts[i];
         }
-        (*env)->SetLongArrayRegion(env, levelTombstoneCounts, 0, stats->num_levels, counts);
-        free(counts);
+        (*env)->SetLongArrayRegion(env, levelTombstoneCounts, 0, stats->num_levels,
+                                   tombstoneCounts);
+        free(tombstoneCounts);
+        tombstoneCounts = NULL;
     }
 
     /* Build ColumnFamilyConfig from stats->config so callers can round-trip CF settings */
     jobject cfConfigObj = NULL;
     if (stats->config != NULL)
     {
-        jclass cfConfigClass = (*env)->FindClass(env, "com/tidesdb/ColumnFamilyConfig");
-        jmethodID fromNative = (*env)->GetStaticMethodID(
-            env, cfConfigClass, "fromNative",
-            "(JJIIJIZDZIIIJLjava/lang/String;IFIJIIDJZZZ)Lcom/tidesdb/ColumnFamilyConfig;");
-
-        jstring comparatorName = (*env)->NewStringUTF(env, stats->config->comparator_name);
-
-        cfConfigObj = (*env)->CallStaticObjectMethod(
-            env, cfConfigClass, fromNative, (jlong)stats->config->write_buffer_size,
-            (jlong)stats->config->level_size_ratio, (jint)stats->config->min_levels,
-            (jint)stats->config->dividing_level_offset, (jlong)stats->config->klog_value_threshold,
-            (jint)stats->config->compression_algorithm,
-            stats->config->enable_bloom_filter != 0 ? JNI_TRUE : JNI_FALSE,
-            (jdouble)stats->config->bloom_fpr,
-            stats->config->enable_block_indexes != 0 ? JNI_TRUE : JNI_FALSE,
-            (jint)stats->config->index_sample_ratio, (jint)stats->config->block_index_prefix_len,
-            (jint)stats->config->sync_mode, (jlong)stats->config->sync_interval_us, comparatorName,
-            (jint)stats->config->skip_list_max_level, (jfloat)stats->config->skip_list_probability,
-            (jint)stats->config->default_isolation_level, (jlong)stats->config->min_disk_space,
-            (jint)stats->config->l1_file_count_trigger,
-            (jint)stats->config->l0_queue_stall_threshold,
-            (jdouble)stats->config->tombstone_density_trigger,
-            (jlong)stats->config->tombstone_density_min_entries,
-            stats->config->use_btree != 0 ? JNI_TRUE : JNI_FALSE,
-            stats->config->object_lazy_compaction != 0 ? JNI_TRUE : JNI_FALSE,
-            stats->config->object_prefetch_compaction != 0 ? JNI_TRUE : JNI_FALSE);
-
-        (*env)->DeleteLocalRef(env, comparatorName);
-        (*env)->DeleteLocalRef(env, cfConfigClass);
+        cfConfigObj = buildCfConfigObject(env, stats->config);
+        if (cfConfigObj == NULL)
+        {
+            tidesdb_free_stats(stats);
+            return NULL;
+        }
     }
 
     jclass statsClass = (*env)->FindClass(env, "com/tidesdb/Stats");
+    if (statsClass == NULL)
+    {
+        tidesdb_free_stats(stats);
+        return NULL;
+    }
+
     jmethodID constructor =
         (*env)->GetMethodID(env, statsClass, "<init>",
                             "(IJ[J[ILcom/tidesdb/ColumnFamilyConfig;JJDD[JDDZJIDJD[JDIJJJJJJJ)V");
+    if (constructor == NULL)
+    {
+        tidesdb_free_stats(stats);
+        return NULL;
+    }
 
     jobject statsObj = (*env)->NewObject(
         env, statsClass, constructor, stats->num_levels, (jlong)stats->memtable_size, levelSizes,
@@ -803,6 +948,7 @@ JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamily_nativeCompactRange(JNIEnv *
         if (startLen > 0)
         {
             startBytes = (*env)->GetByteArrayElements(env, startKey, NULL);
+            if (startBytes == NULL) return; /* JVM exception already pending */
         }
     }
 
@@ -814,25 +960,23 @@ JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamily_nativeCompactRange(JNIEnv *
         if (endLen > 0)
         {
             endBytes = (*env)->GetByteArrayElements(env, endKey, NULL);
+            if (endBytes == NULL)
+            {
+                if (startBytes != NULL)
+                    (*env)->ReleaseByteArrayElements(env, startKey, startBytes, JNI_ABORT);
+                return; /* JVM exception already pending */
+            }
         }
     }
 
     int result = tidesdb_compact_range(cf, (const uint8_t *)startBytes, (size_t)startLen,
                                        (const uint8_t *)endBytes, (size_t)endLen);
 
-    if (startBytes != NULL)
-    {
-        (*env)->ReleaseByteArrayElements(env, startKey, startBytes, JNI_ABORT);
-    }
-    if (endBytes != NULL)
-    {
-        (*env)->ReleaseByteArrayElements(env, endKey, endBytes, JNI_ABORT);
-    }
+    if (startBytes != NULL) (*env)->ReleaseByteArrayElements(env, startKey, startBytes, JNI_ABORT);
+    if (endBytes != NULL) (*env)->ReleaseByteArrayElements(env, endKey, endBytes, JNI_ABORT);
 
-    if (result != TDB_SUCCESS)
-    {
+    if (result != TDB_SUCCESS && !jvm_exception_pending(env))
         throwTidesDBException(env, result, getErrorMessage(result));
-    }
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamily_nativeFlushMemtable(JNIEnv *env, jclass cls,
@@ -895,7 +1039,14 @@ JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativePut(JNIEnv *env, jclas
     jsize valueLen = (*env)->GetArrayLength(env, value);
 
     jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) return; /* JVM exception already pending */
+
     jbyte *valueBytes = (*env)->GetByteArrayElements(env, value, NULL);
+    if (valueBytes == NULL)
+    {
+        (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        return; /* JVM exception already pending */
+    }
 
     int result = tidesdb_txn_put(txn, cf, (uint8_t *)keyBytes, keyLen, (uint8_t *)valueBytes,
                                  valueLen, (time_t)ttl);
@@ -903,10 +1054,8 @@ JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativePut(JNIEnv *env, jclas
     (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
     (*env)->ReleaseByteArrayElements(env, value, valueBytes, JNI_ABORT);
 
-    if (result != TDB_SUCCESS)
-    {
+    if (result != TDB_SUCCESS && !jvm_exception_pending(env))
         throwTidesDBException(env, result, getErrorMessage(result));
-    }
 }
 
 JNIEXPORT jbyteArray JNICALL Java_com_tidesdb_Transaction_nativeGet(JNIEnv *env, jclass cls,
@@ -918,6 +1067,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_tidesdb_Transaction_nativeGet(JNIEnv *env,
 
     jsize keyLen = (*env)->GetArrayLength(env, key);
     jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) return NULL; /* JVM exception already pending */
 
     uint8_t *value = NULL;
     size_t valueLen = 0;
@@ -928,12 +1078,28 @@ JNIEXPORT jbyteArray JNICALL Java_com_tidesdb_Transaction_nativeGet(JNIEnv *env,
 
     if (result != TDB_SUCCESS)
     {
-        throwTidesDBException(env, result, getErrorMessage(result));
+        if (!jvm_exception_pending(env))
+            throwTidesDBException(env, result, getErrorMessage(result));
+        if (value != NULL) free(value);
         return NULL;
     }
 
-    jbyteArray resultArray = (*env)->NewByteArray(env, valueLen);
-    (*env)->SetByteArrayRegion(env, resultArray, 0, valueLen, (jbyte *)value);
+    if (valueLen > (size_t)JSIZE_MAX)
+    {
+        free(value);
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/ArrayIndexOutOfBoundsException"),
+                         "value exceeds maximum Java array size");
+        return NULL;
+    }
+
+    jbyteArray resultArray = (*env)->NewByteArray(env, (jsize)valueLen);
+    if (resultArray == NULL)
+    {
+        free(value);
+        return NULL; /* JVM exception (OOM) already pending */
+    }
+
+    (*env)->SetByteArrayRegion(env, resultArray, 0, (jsize)valueLen, (jbyte *)value);
     free(value);
 
     return resultArray;
@@ -948,15 +1114,14 @@ JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativeDelete(JNIEnv *env, jc
 
     jsize keyLen = (*env)->GetArrayLength(env, key);
     jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) return; /* JVM exception already pending */
 
     int result = tidesdb_txn_delete(txn, cf, (uint8_t *)keyBytes, keyLen);
 
     (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
 
-    if (result != TDB_SUCCESS)
-    {
+    if (result != TDB_SUCCESS && !jvm_exception_pending(env))
         throwTidesDBException(env, result, getErrorMessage(result));
-    }
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativeSingleDelete(JNIEnv *env, jclass cls,
@@ -968,15 +1133,14 @@ JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativeSingleDelete(JNIEnv *e
 
     jsize keyLen = (*env)->GetArrayLength(env, key);
     jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) return; /* JVM exception already pending */
 
     int result = tidesdb_txn_single_delete(txn, cf, (uint8_t *)keyBytes, keyLen);
 
     (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
 
-    if (result != TDB_SUCCESS)
-    {
+    if (result != TDB_SUCCESS && !jvm_exception_pending(env))
         throwTidesDBException(env, result, getErrorMessage(result));
-    }
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativeCommit(JNIEnv *env, jclass cls,
@@ -1123,15 +1287,14 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDBIterator_nativeSeek(JNIEnv *env, 
     tidesdb_iter_t *iter = (tidesdb_iter_t *)(uintptr_t)handle;
     jsize keyLen = (*env)->GetArrayLength(env, key);
     jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) return; /* JVM exception already pending */
 
     int result = tidesdb_iter_seek(iter, (uint8_t *)keyBytes, keyLen);
 
     (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
 
-    if (result != TDB_SUCCESS)
-    {
+    if (result != TDB_SUCCESS && !jvm_exception_pending(env))
         throwTidesDBException(env, result, getErrorMessage(result));
-    }
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_TidesDBIterator_nativeSeekForPrev(JNIEnv *env, jclass cls,
@@ -1141,15 +1304,14 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDBIterator_nativeSeekForPrev(JNIEnv
     tidesdb_iter_t *iter = (tidesdb_iter_t *)(uintptr_t)handle;
     jsize keyLen = (*env)->GetArrayLength(env, key);
     jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) return; /* JVM exception already pending */
 
     int result = tidesdb_iter_seek_for_prev(iter, (uint8_t *)keyBytes, keyLen);
 
     (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
 
-    if (result != TDB_SUCCESS)
-    {
+    if (result != TDB_SUCCESS && !jvm_exception_pending(env))
         throwTidesDBException(env, result, getErrorMessage(result));
-    }
 }
 
 JNIEXPORT jboolean JNICALL Java_com_tidesdb_TidesDBIterator_nativeValid(JNIEnv *env, jclass cls,
@@ -1195,12 +1357,22 @@ JNIEXPORT jbyteArray JNICALL Java_com_tidesdb_TidesDBIterator_nativeKey(JNIEnv *
     int result = tidesdb_iter_key(iter, &key, &keyLen);
     if (result != TDB_SUCCESS)
     {
-        throwTidesDBException(env, result, getErrorMessage(result));
+        if (!jvm_exception_pending(env))
+            throwTidesDBException(env, result, getErrorMessage(result));
         return NULL;
     }
 
-    jbyteArray resultArray = (*env)->NewByteArray(env, keyLen);
-    (*env)->SetByteArrayRegion(env, resultArray, 0, keyLen, (jbyte *)key);
+    if (keyLen > (size_t)JSIZE_MAX)
+    {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/ArrayIndexOutOfBoundsException"),
+                         "key exceeds maximum Java array size");
+        return NULL;
+    }
+
+    jbyteArray resultArray = (*env)->NewByteArray(env, (jsize)keyLen);
+    if (resultArray == NULL) return NULL; /* JVM exception (OOM) already pending */
+
+    (*env)->SetByteArrayRegion(env, resultArray, 0, (jsize)keyLen, (jbyte *)key);
 
     return resultArray;
 }
@@ -1215,12 +1387,22 @@ JNIEXPORT jbyteArray JNICALL Java_com_tidesdb_TidesDBIterator_nativeValue(JNIEnv
     int result = tidesdb_iter_value(iter, &value, &valueLen);
     if (result != TDB_SUCCESS)
     {
-        throwTidesDBException(env, result, getErrorMessage(result));
+        if (!jvm_exception_pending(env))
+            throwTidesDBException(env, result, getErrorMessage(result));
         return NULL;
     }
 
-    jbyteArray resultArray = (*env)->NewByteArray(env, valueLen);
-    (*env)->SetByteArrayRegion(env, resultArray, 0, valueLen, (jbyte *)value);
+    if (valueLen > (size_t)JSIZE_MAX)
+    {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/ArrayIndexOutOfBoundsException"),
+                         "value exceeds maximum Java array size");
+        return NULL;
+    }
+
+    jbyteArray resultArray = (*env)->NewByteArray(env, (jsize)valueLen);
+    if (resultArray == NULL) return NULL; /* JVM exception (OOM) already pending */
+
+    (*env)->SetByteArrayRegion(env, resultArray, 0, (jsize)valueLen, (jbyte *)value);
 
     return resultArray;
 }
@@ -1525,20 +1707,18 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetDbStats(JNIEnv *env,
     }
 
     jclass dbStatsClass = (*env)->FindClass(env, "com/tidesdb/DbStats");
-    /* Constructor signature:
-       int, long, long, long, int, int, long, int, int, long, int, long, long, long, long,
-       boolean, long, int, boolean, int, long,
-       boolean, String, long, long, int, long, long, long, long, boolean,
-       long (primaryEpoch), long (seenEpoch),
-       long, long, long, long, long, long, long, long */
+    if (dbStatsClass == NULL) return NULL;
+
     jmethodID constructor =
         (*env)->GetMethodID(env, dbStatsClass, "<init>",
                             "(IJJJIIJIIJIJJJJZJIZIJZLjava/lang/String;JJIJJJJZJJJJJJJJJJ)V");
+    if (constructor == NULL) return NULL;
 
     jstring connectorStr = NULL;
     if (db_stats.object_store_connector != NULL)
     {
         connectorStr = (*env)->NewStringUTF(env, db_stats.object_store_connector);
+        if (connectorStr == NULL) return NULL;
     }
 
     return (*env)->NewObject(
@@ -1575,7 +1755,14 @@ JNIEXPORT jdouble JNICALL Java_com_tidesdb_ColumnFamily_nativeRangeCost(JNIEnv *
     jsize keyBLen = (*env)->GetArrayLength(env, keyB);
 
     jbyte *keyABytes = (*env)->GetByteArrayElements(env, keyA, NULL);
+    if (keyABytes == NULL) return 0.0; /* JVM exception already pending */
+
     jbyte *keyBBytes = (*env)->GetByteArrayElements(env, keyB, NULL);
+    if (keyBBytes == NULL)
+    {
+        (*env)->ReleaseByteArrayElements(env, keyA, keyABytes, JNI_ABORT);
+        return 0.0; /* JVM exception already pending */
+    }
 
     double cost = 0.0;
     int result =
@@ -1586,7 +1773,8 @@ JNIEXPORT jdouble JNICALL Java_com_tidesdb_ColumnFamily_nativeRangeCost(JNIEnv *
 
     if (result != TDB_SUCCESS)
     {
-        throwTidesDBException(env, result, getErrorMessage(result));
+        if (!jvm_exception_pending(env))
+            throwTidesDBException(env, result, getErrorMessage(result));
         return 0.0;
     }
 
@@ -1826,18 +2014,40 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDBIterator_nativeKeyValue(JNIEnv
     int result = tidesdb_iter_key_value(iter, &key, &keyLen, &value, &valueLen);
     if (result != TDB_SUCCESS)
     {
-        throwTidesDBException(env, result, getErrorMessage(result));
+        if (!jvm_exception_pending(env))
+            throwTidesDBException(env, result, getErrorMessage(result));
         return NULL;
     }
 
-    jbyteArray jkey = (*env)->NewByteArray(env, keyLen);
-    (*env)->SetByteArrayRegion(env, jkey, 0, keyLen, (jbyte *)key);
+    if (keyLen > (size_t)JSIZE_MAX)
+    {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/ArrayIndexOutOfBoundsException"),
+                         "key exceeds maximum Java array size");
+        return NULL;
+    }
 
-    jbyteArray jvalue = (*env)->NewByteArray(env, valueLen);
-    (*env)->SetByteArrayRegion(env, jvalue, 0, valueLen, (jbyte *)value);
+    if (valueLen > (size_t)JSIZE_MAX)
+    {
+        (*env)->ThrowNew(env, (*env)->FindClass(env, "java/lang/ArrayIndexOutOfBoundsException"),
+                         "value exceeds maximum Java array size");
+        return NULL;
+    }
+
+    jbyteArray jkey = (*env)->NewByteArray(env, (jsize)keyLen);
+    if (jkey == NULL) return NULL; /* JVM exception (OOM) already pending */
+
+    jbyteArray jvalue = (*env)->NewByteArray(env, (jsize)valueLen);
+    if (jvalue == NULL) return NULL; /* JVM exception (OOM) already pending; jkey will be GCed */
+
+    (*env)->SetByteArrayRegion(env, jkey, 0, (jsize)keyLen, (jbyte *)key);
+    (*env)->SetByteArrayRegion(env, jvalue, 0, (jsize)valueLen, (jbyte *)value);
 
     jclass kvClass = (*env)->FindClass(env, "com/tidesdb/KeyValue");
-    jmethodID ctor = (*env)->GetMethodID(env, kvClass, "<init>", "([B[B)V");
+    if (kvClass == NULL) return NULL;
 
-    return (*env)->NewObject(env, kvClass, ctor, jkey, jvalue);
+    jmethodID ctor = (*env)->GetMethodID(env, kvClass, "<init>", "([B[B)V");
+    if (ctor == NULL) return NULL;
+
+    jobject result_obj = (*env)->NewObject(env, kvClass, ctor, jkey, jvalue);
+    return result_obj;
 }

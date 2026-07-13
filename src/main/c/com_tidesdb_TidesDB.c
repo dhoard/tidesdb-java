@@ -25,6 +25,26 @@
 #include <dlfcn.h>
 #endif
 
+/* ABI-compatible overlay for tidesdb_objstore_t.
+ * The FFI header (db.h) defines this type as opaque. The real layout is published
+ * in tidesdb/objstore.h and is part of the stable library ABI. This overlay lets
+ * us call destroy(ctx) + free() on the connector failure path without pulling in
+ * the full objstore.h header (which conflicts with db.h). */
+struct _tidesdb_objstore_overlay
+{
+    int backend;
+    void *put;
+    void *get;
+    void *range_get;
+    void *delete_object;
+    void *exists;
+    void *list;
+    void *put_if;
+    void *head;
+    void (*destroy)(void *ctx);
+    void *ctx;
+};
+
 static void throwTidesDBException(JNIEnv *env, int errorCode, const char *message)
 {
     jclass exClass = (*env)->FindClass(env, "com/tidesdb/TidesDBException");
@@ -181,6 +201,22 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
 
     if (result != TDB_SUCCESS)
     {
+        /* Destroy any connector that was not transferred to tidesdb_open.
+         * Externally-provided connectors (e.g. S3) and locally-created
+         * filesystem connectors are both owned by this JNI call until
+         * tidesdb_open succeeds. On failure we must release them. */
+        if (obj_store != NULL)
+        {
+            struct _tidesdb_objstore_overlay *overlay =
+                (struct _tidesdb_objstore_overlay *)obj_store;
+            if (overlay->destroy)
+            {
+                overlay->destroy(overlay->ctx);
+            }
+            free(obj_store);
+            obj_store = NULL;
+        }
+
         throwTidesDBException(env, result, getErrorMessage(result));
         return 0;
     }

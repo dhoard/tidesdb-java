@@ -2538,6 +2538,35 @@ public class TidesDBTest {
     }
 
     @Test
+    @Order(69)
+    void testRepeatedS3OpenFailureDoesNotCrash() {
+        if (!TidesDB.isS3Available()) {
+            // S3 support not compiled in; nothing to verify.
+            return;
+        }
+
+        // Use a port that is almost certainly unused (distinct from 9000 used by other tests)
+        S3Config s3 = S3Config.builder()
+            .endpoint("127.0.0.1:19000")
+            .bucket("tidesdb-test")
+            .accessKey("minioadmin")
+            .secretKey("minioadmin")
+            .usePathStyle(true)
+            .useSsl(false)
+            .build();
+
+        Config config = Config.builder(tempDir.resolve("testdb_s3_leak").toString())
+            .objectStoreS3Config(s3)
+            .build();
+
+        // Each iteration creates an S3 connector then fails tidesdb_open.
+        // Without the fix the connector leaks native memory.
+        for (int i = 0; i < 50; i++) {
+            assertThrows(TidesDBException.class, () -> TidesDB.open(config));
+        }
+    }
+
+    @Test
     @Order(66)
     void testSetClearHookNotRacingClose() throws TidesDBException, InterruptedException {
         Config config = Config.builder(tempDir.resolve("testdb_hook_race_close").toString())

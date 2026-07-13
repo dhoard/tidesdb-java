@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <tidesdb/db.h>
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -156,7 +157,30 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeOpen(
         }
         if (fs_path != NULL)
         {
+            /* Validate that the path is an existing directory before creating the
+             * connector. tidesdb_objstore_fs_create silently succeeds on a regular
+             * file path, which would cause the database to open with a broken
+             * object store backend. */
+            struct stat st;
+            if (stat(fs_path, &st) != 0 || !S_ISDIR(st.st_mode))
+            {
+                (*env)->ReleaseStringUTFChars(env, objectStoreFsPath, fs_path);
+                (*env)->ReleaseStringUTFChars(env, dbPath, path);
+                if (!jvm_exception_pending(env))
+                    throwTidesDBException(env, TDB_ERR_IO,
+                                          "Failed to create filesystem object store connector");
+                return 0;
+            }
             obj_store = tidesdb_objstore_fs_create(fs_path);
+            if (obj_store == NULL)
+            {
+                (*env)->ReleaseStringUTFChars(env, objectStoreFsPath, fs_path);
+                (*env)->ReleaseStringUTFChars(env, dbPath, path);
+                if (!jvm_exception_pending(env))
+                    throwTidesDBException(env, TDB_ERR_IO,
+                                          "Failed to create filesystem object store connector");
+                return 0;
+            }
         }
     }
 

@@ -458,6 +458,31 @@ public class Config {
             if (maxOpenSSTables <= 0) {
                 throw new IllegalArgumentException("Max open SSTables must be positive");
             }
+            if (logTruncationAt < 0) {
+                throw new IllegalArgumentException("logTruncationAt must not be negative, was: " + logTruncationAt);
+            }
+            if (maxMemoryUsage < 0) {
+                throw new IllegalArgumentException("maxMemoryUsage must not be negative, was: " + maxMemoryUsage);
+            }
+            if (unifiedMemtableWriteBufferSize < 0) {
+                throw new IllegalArgumentException("unifiedMemtableWriteBufferSize must not be negative, was: " + unifiedMemtableWriteBufferSize);
+            }
+            if (unifiedMemtableSyncIntervalUs < 0) {
+                throw new IllegalArgumentException("unifiedMemtableSyncIntervalUs must not be negative, was: " + unifiedMemtableSyncIntervalUs);
+            }
+            if (unifiedMemtableSkipListMaxLevel < 0) {
+                throw new IllegalArgumentException("unifiedMemtableSkipListMaxLevel must not be negative, was: " + unifiedMemtableSkipListMaxLevel);
+            }
+            if (Float.isNaN(unifiedMemtableSkipListProbability) || Float.isInfinite(unifiedMemtableSkipListProbability)
+                    || unifiedMemtableSkipListProbability < 0.0f || unifiedMemtableSkipListProbability > 1.0f) {
+                throw new IllegalArgumentException("unifiedMemtableSkipListProbability must be finite and in [0.0, 1.0], was: " + unifiedMemtableSkipListProbability);
+            }
+            if (unifiedMemtableSyncMode < 0) {
+                throw new IllegalArgumentException("unifiedMemtableSyncMode must not be negative, was: " + unifiedMemtableSyncMode);
+            }
+            if (maxConcurrentFlushes < 0) {
+                throw new IllegalArgumentException("maxConcurrentFlushes must not be negative, was: " + maxConcurrentFlushes);
+            }
         }
     }
 }

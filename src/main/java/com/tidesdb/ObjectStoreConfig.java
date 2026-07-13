@@ -196,7 +196,32 @@ public class ObjectStoreConfig {
         }
 
         public ObjectStoreConfig build() {
+            validate();
             return new ObjectStoreConfig(this);
+        }
+
+        private void validate() {
+            if (localCacheMaxBytes < 0) {
+                throw new IllegalArgumentException("localCacheMaxBytes must not be negative, was: " + localCacheMaxBytes);
+            }
+            if (maxConcurrentUploads <= 0) {
+                throw new IllegalArgumentException("maxConcurrentUploads must be positive, was: " + maxConcurrentUploads);
+            }
+            if (maxConcurrentDownloads <= 0) {
+                throw new IllegalArgumentException("maxConcurrentDownloads must be positive, was: " + maxConcurrentDownloads);
+            }
+            if (multipartThreshold < 0) {
+                throw new IllegalArgumentException("multipartThreshold must not be negative, was: " + multipartThreshold);
+            }
+            if (multipartPartSize < 0) {
+                throw new IllegalArgumentException("multipartPartSize must not be negative, was: " + multipartPartSize);
+            }
+            if (walSyncThresholdBytes < 0) {
+                throw new IllegalArgumentException("walSyncThresholdBytes must not be negative, was: " + walSyncThresholdBytes);
+            }
+            if (replicaSyncIntervalUs < 0) {
+                throw new IllegalArgumentException("replicaSyncIntervalUs must not be negative, was: " + replicaSyncIntervalUs);
+            }
         }
     }
 }

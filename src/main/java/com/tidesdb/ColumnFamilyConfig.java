@@ -695,7 +695,75 @@ public class ColumnFamilyConfig {
          * @return a new {@code ColumnFamilyConfig}
          */
         public ColumnFamilyConfig build() {
+            validate();
             return new ColumnFamilyConfig(this);
+        }
+
+        private void validate() {
+            // Nullable-enum checks (do first, before field-level checks)
+            if (compressionAlgorithm == null) {
+                throw new IllegalArgumentException("compressionAlgorithm must not be null");
+            }
+            if (syncMode == null) {
+                throw new IllegalArgumentException("syncMode must not be null");
+            }
+            if (defaultIsolationLevel == null) {
+                throw new IllegalArgumentException("defaultIsolationLevel must not be null");
+            }
+
+            // Non-negative (zero sentinel OK)
+            if (klogValueThreshold < 0) {
+                throw new IllegalArgumentException("klogValueThreshold must not be negative, was: " + klogValueThreshold);
+            }
+            if (syncIntervalUs < 0) {
+                throw new IllegalArgumentException("syncIntervalUs must not be negative, was: " + syncIntervalUs);
+            }
+            if (minDiskSpace < 0) {
+                throw new IllegalArgumentException("minDiskSpace must not be negative, was: " + minDiskSpace);
+            }
+            if (dividingLevelOffset < 0) {
+                throw new IllegalArgumentException("dividingLevelOffset must not be negative, was: " + dividingLevelOffset);
+            }
+            if (blockIndexPrefixLen < 0) {
+                throw new IllegalArgumentException("blockIndexPrefixLen must not be negative, was: " + blockIndexPrefixLen);
+            }
+            if (skipListMaxLevel < 0) {
+                throw new IllegalArgumentException("skipListMaxLevel must not be negative, was: " + skipListMaxLevel);
+            }
+
+            // Positive-required (zero rejected)
+            if (writeBufferSize <= 0) {
+                throw new IllegalArgumentException("writeBufferSize must be positive, was: " + writeBufferSize);
+            }
+            if (levelSizeRatio <= 0) {
+                throw new IllegalArgumentException("levelSizeRatio must be positive, was: " + levelSizeRatio);
+            }
+            if (minLevels <= 0) {
+                throw new IllegalArgumentException("minLevels must be positive, was: " + minLevels);
+            }
+            if (indexSampleRatio <= 0) {
+                throw new IllegalArgumentException("indexSampleRatio must be positive, was: " + indexSampleRatio);
+            }
+            if (l1FileCountTrigger <= 0) {
+                throw new IllegalArgumentException("l1FileCountTrigger must be positive, was: " + l1FileCountTrigger);
+            }
+            if (l0QueueStallThreshold <= 0) {
+                throw new IllegalArgumentException("l0QueueStallThreshold must be positive, was: " + l0QueueStallThreshold);
+            }
+            if (tombstoneDensityMinEntries <= 0) {
+                throw new IllegalArgumentException("tombstoneDensityMinEntries must be positive, was: " + tombstoneDensityMinEntries);
+            }
+
+            // Float/double range and finiteness
+            if (Double.isNaN(bloomFPR) || Double.isInfinite(bloomFPR) || bloomFPR < 0.0 || bloomFPR > 1.0) {
+                throw new IllegalArgumentException("bloomFPR must be finite and in [0.0, 1.0], was: " + bloomFPR);
+            }
+            if (Float.isNaN(skipListProbability) || Float.isInfinite(skipListProbability) || skipListProbability < 0.0f || skipListProbability > 1.0f) {
+                throw new IllegalArgumentException("skipListProbability must be finite and in [0.0, 1.0], was: " + skipListProbability);
+            }
+            if (Double.isNaN(tombstoneDensityTrigger) || Double.isInfinite(tombstoneDensityTrigger) || tombstoneDensityTrigger < 0.0 || tombstoneDensityTrigger > 1.0) {
+                throw new IllegalArgumentException("tombstoneDensityTrigger must be finite and in [0.0, 1.0], was: " + tombstoneDensityTrigger);
+            }
         }
     }
 }

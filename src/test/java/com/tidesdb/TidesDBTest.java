@@ -2700,6 +2700,212 @@ public class TidesDBTest {
     }
 
     @Test
+    @Order(75)
+    void testConfigValidationRejectsNegativeUnsignedFields() {
+        // logTruncationAt < 0
+        assertThrows(IllegalArgumentException.class,
+            () -> Config.builder(tempDir.toString()).logTruncationAt(-1).build());
+        try {
+            Config.builder(tempDir.toString()).logTruncationAt(-1).build();
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("logTruncationAt"),
+                "message should mention field name, was: " + e.getMessage());
+            assertTrue(e.getMessage().toLowerCase().contains("negative"),
+                "message should mention negative, was: " + e.getMessage());
+        }
+
+        // maxMemoryUsage < 0
+        assertThrows(IllegalArgumentException.class,
+            () -> Config.builder(tempDir.toString()).maxMemoryUsage(-1).build());
+        try {
+            Config.builder(tempDir.toString()).maxMemoryUsage(-1).build();
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("maxMemoryUsage"),
+                "message should mention field name, was: " + e.getMessage());
+            assertTrue(e.getMessage().toLowerCase().contains("negative"),
+                "message should mention negative, was: " + e.getMessage());
+        }
+
+        // unifiedMemtableWriteBufferSize < 0
+        assertThrows(IllegalArgumentException.class,
+            () -> Config.builder(tempDir.toString()).unifiedMemtableWriteBufferSize(-1).build());
+        try {
+            Config.builder(tempDir.toString()).unifiedMemtableWriteBufferSize(-1).build();
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("unifiedMemtableWriteBufferSize"),
+                "message should mention field name, was: " + e.getMessage());
+            assertTrue(e.getMessage().toLowerCase().contains("negative"),
+                "message should mention negative, was: " + e.getMessage());
+        }
+
+        // unifiedMemtableSyncIntervalUs < 0
+        assertThrows(IllegalArgumentException.class,
+            () -> Config.builder(tempDir.toString()).unifiedMemtableSyncIntervalUs(-1).build());
+        try {
+            Config.builder(tempDir.toString()).unifiedMemtableSyncIntervalUs(-1).build();
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("unifiedMemtableSyncIntervalUs"),
+                "message should mention field name, was: " + e.getMessage());
+            assertTrue(e.getMessage().toLowerCase().contains("negative"),
+                "message should mention negative, was: " + e.getMessage());
+        }
+    }
+
+    @Test
+    @Order(76)
+    void testObjectStoreConfigValidation() {
+        // Reject negative unsigned-native fields (zero sentinel accepted)
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().localCacheMaxBytes(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().multipartThreshold(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().multipartPartSize(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().walSyncThresholdBytes(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().replicaSyncIntervalUs(-1).build());
+
+        // Positive-required (<= 0 rejected)
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().maxConcurrentUploads(0).build());
+        try {
+            ObjectStoreConfig.builder().maxConcurrentUploads(0).build();
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("maxConcurrentUploads"),
+                "message should mention field name, was: " + e.getMessage());
+            assertTrue(e.getMessage().toLowerCase().contains("positive"),
+                "message should mention positive, was: " + e.getMessage());
+        }
+
+        assertThrows(IllegalArgumentException.class,
+            () -> ObjectStoreConfig.builder().maxConcurrentDownloads(-1).build());
+        try {
+            ObjectStoreConfig.builder().maxConcurrentDownloads(-1).build();
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("maxConcurrentDownloads"),
+                "message should mention field name, was: " + e.getMessage());
+            assertTrue(e.getMessage().toLowerCase().contains("positive"),
+                "message should mention positive, was: " + e.getMessage());
+        }
+
+        // Zero sentinel accepted for localCacheMaxBytes
+        assertDoesNotThrow(() -> ObjectStoreConfig.builder().localCacheMaxBytes(0).build());
+    }
+
+    @Test
+    @Order(77)
+    void testS3ConfigValidation() {
+        S3Config.Builder baseBuilder = S3Config.builder()
+            .endpoint("s3.amazonaws.com")
+            .bucket("b")
+            .accessKey("ak")
+            .secretKey("sk");
+
+        // Reject negative multipart fields
+        assertThrows(IllegalArgumentException.class,
+            () -> baseBuilder.multipartThreshold(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> S3Config.builder()
+                .endpoint("s3.amazonaws.com")
+                .bucket("b")
+                .accessKey("ak")
+                .secretKey("sk")
+                .multipartPartSize(-1)
+                .build());
+
+        // Zero sentinels accepted
+        assertDoesNotThrow(() -> S3Config.builder()
+            .endpoint("s3.amazonaws.com")
+            .bucket("b")
+            .accessKey("ak")
+            .secretKey("sk")
+            .multipartThreshold(0)
+            .multipartPartSize(0)
+            .build());
+
+        // Existing required-string validation still passes
+        assertThrows(IllegalArgumentException.class, () -> S3Config.builder().build());
+    }
+
+    @Test
+    @Order(78)
+    void testColumnFamilyConfigValidation() {
+        // Reject negative unsigned-native fields (zero sentinel accepted)
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().klogValueThreshold(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().syncIntervalUs(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().minDiskSpace(-1).build());
+
+        // Positive-required fields (<= 0 rejected)
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().writeBufferSize(0).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().levelSizeRatio(0).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().minLevels(0).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().indexSampleRatio(0).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().l1FileCountTrigger(0).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().l0QueueStallThreshold(0).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().tombstoneDensityMinEntries(0).build());
+
+        // Non-negative-int fields (zero acceptable, negative rejected)
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().dividingLevelOffset(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().blockIndexPrefixLen(-1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().skipListMaxLevel(-1).build());
+
+        // Float/double NaN/infinity/range rejection: bloomFPR
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().bloomFPR(Double.NaN).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().bloomFPR(Double.POSITIVE_INFINITY).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().bloomFPR(-0.1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().bloomFPR(1.1).build());
+
+        // Float/double NaN/infinity/range rejection: skipListProbability
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().skipListProbability(Float.NaN).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().skipListProbability(Float.POSITIVE_INFINITY).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().skipListProbability(-0.1f).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().skipListProbability(1.1f).build());
+
+        // Float/double NaN/infinity/range rejection: tombstoneDensityTrigger
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().tombstoneDensityTrigger(Double.NaN).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().tombstoneDensityTrigger(Double.POSITIVE_INFINITY).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().tombstoneDensityTrigger(-0.1).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().tombstoneDensityTrigger(1.1).build());
+
+        // Nullable-enum null rejection
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().compressionAlgorithm(null).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().syncMode(null).build());
+        assertThrows(IllegalArgumentException.class,
+            () -> ColumnFamilyConfig.builder().defaultIsolationLevel(null).build());
+
+        // fromNative compatibility: engine-supplied values must be accepted
+        assertDoesNotThrow(() -> ColumnFamilyConfig.defaultConfig());
+    }
+
+    @Test
     @Order(74)
     void testS3PrecedenceOverFsPathOnFailure() throws TidesDBException {
         Path osFile = tempDir.resolve("os_file_s3");

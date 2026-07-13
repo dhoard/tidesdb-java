@@ -157,6 +157,12 @@ public class S3Config {
             if (secretKey == null || secretKey.isEmpty()) {
                 throw new IllegalArgumentException("S3 secret key is required");
             }
+            if (multipartThreshold < 0) {
+                throw new IllegalArgumentException("multipartThreshold must not be negative, was: " + multipartThreshold);
+            }
+            if (multipartPartSize < 0) {
+                throw new IllegalArgumentException("multipartPartSize must not be negative, was: " + multipartPartSize);
+            }
             return new S3Config(this);
         }
     }

@@ -2646,4 +2646,140 @@ public class TidesDBTest {
             replacer.join(5000);
         }
     }
+
+    @Test
+    @Order(70)
+    void testJniBufferMethodsCoverage() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_coverage").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("coverage_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("coverage_cf");
+
+            // Insert 100 entries into one transaction and commit
+            try (Transaction txn = db.beginTransaction()) {
+                for (int i = 0; i < 100; i++) {
+                    byte[] key = String.format("cov_key%04d", i).getBytes(StandardCharsets.UTF_8);
+                    byte[] value = ("cov_value" + i).getBytes(StandardCharsets.UTF_8);
+                    txn.put(cf, key, value);
+                }
+                txn.commit();
+            }
+
+            // 1. Transaction put/get/delete/singleDelete with various byte arrays
+            try (Transaction txn = db.beginTransaction()) {
+                // put with a 0-length value and a 1-byte key
+                byte[] tinyKey = new byte[]{0x42};
+                byte[] emptyValue = new byte[0];
+                txn.put(cf, tinyKey, emptyValue);
+
+                // get of that entry
+                byte[] got = txn.get(cf, tinyKey);
+                assertNotNull(got, "get should return a non-null result for the 0-length value entry");
+                assertEquals(0, got.length, "value should be 0-length");
+
+                // delete that entry
+                txn.delete(cf, tinyKey);
+
+                // singleDelete of a fresh entry
+                byte[] sdKey = new byte[]{0x43};
+                byte[] sdValue = new byte[]{0x01};
+                txn.put(cf, sdKey, sdValue);
+                txn.singleDelete(cf, sdKey);
+
+                txn.commit();
+            }
+
+            // Confirm get of deleted key throws TidesDBException
+            try (Transaction txn = db.beginTransaction()) {
+                assertThrows(TidesDBException.class, () -> txn.get(cf, new byte[]{0x42}));
+                assertThrows(TidesDBException.class, () -> txn.get(cf, new byte[]{0x43}));
+            }
+
+            // 2. Iterator seek/seekForPrev/key/value/keyValue
+            try (Transaction txn = db.beginTransaction()) {
+                try (TidesDBIterator iter = txn.newIterator(cf)) {
+                    iter.seekToFirst();
+                    int count = 0;
+                    while (iter.isValid()) {
+                        byte[] k = iter.key();
+                        byte[] v = iter.value();
+                        KeyValue kv = iter.keyValue();
+                        assertNotNull(k, "iterator key should not be null");
+                        assertNotNull(v, "iterator value should not be null");
+                        assertNotNull(kv, "iterator keyValue should not be null");
+                        assertNotNull(kv.getKey(), "KeyValue.getKey() should not be null");
+                        assertNotNull(kv.getValue(), "KeyValue.getValue() should not be null");
+                        count++;
+                        iter.next();
+                    }
+                    assertEquals(100, count, "iterator should visit exactly 100 entries");
+                }
+            }
+
+            // seek and seekForPrev
+            try (Transaction txn = db.beginTransaction()) {
+                try (TidesDBIterator iter = txn.newIterator(cf)) {
+                    byte[] targetKey = String.format("cov_key%04d", 50).getBytes(StandardCharsets.UTF_8);
+                    iter.seek(targetKey);
+                    assertTrue(iter.isValid(), "iterator should be valid after seek");
+                    byte[] seekedKey = iter.key();
+                    assertNotNull(seekedKey);
+                    assertTrue(seekedKey.length > 0, "seeked key should not be empty");
+
+                    iter.seekForPrev(targetKey);
+                    assertTrue(iter.isValid(), "iterator should be valid after seekForPrev");
+                    byte[] seekedForPrevKey = iter.key();
+                    assertNotNull(seekedForPrevKey);
+                    assertTrue(seekedForPrevKey.length > 0, "seekForPrev key should not be empty");
+                }
+            }
+
+            // 3. compactRange with single-byte bounds and with one-null-one-nonnull
+            cf.flushMemtable();
+            assertDoesNotThrow(() -> cf.compactRange(new byte[]{0x10}, new byte[]{0x20}),
+                "compactRange with valid bounds should succeed");
+            assertDoesNotThrow(() -> cf.compactRange(null, new byte[]{0x20}),
+                "compactRange with null start should succeed");
+            assertDoesNotThrow(() -> cf.compactRange(new byte[]{0x10}, null),
+                "compactRange with null end should succeed");
+
+            // 4. rangeCost with single-byte bounds
+            double cost = cf.rangeCost(new byte[]{0x01}, new byte[]{(byte) 0xFF});
+            assertTrue(cost >= 0.0, "rangeCost should be non-negative");
+
+            // 5. getStats on the CF after data insertion
+            Stats stats = cf.getStats();
+            assertNotNull(stats, "getStats should return non-null");
+
+            // 6. getDbStats on the database handle
+            DbStats dbStats = db.getDbStats();
+            assertNotNull(dbStats, "getDbStats should return non-null");
+
+            // 7. listColumnFamilies and iterate the result
+            String[] families = db.listColumnFamilies();
+            assertNotNull(families, "listColumnFamilies should return non-null");
+            assertTrue(families.length > 0, "should have at least one column family");
+            boolean found = false;
+            for (String f : families) {
+                if ("coverage_cf".equals(f)) {
+                    found = true;
+                    break;
+                }
+            }
+            assertTrue(found, "coverage_cf should be in the list");
+
+            // 8. getCacheStats on the database handle
+            CacheStats cacheStats = db.getCacheStats();
+            assertNotNull(cacheStats, "getCacheStats should return non-null");
+        }
+    }
 }

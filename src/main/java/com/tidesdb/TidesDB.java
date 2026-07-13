@@ -19,6 +19,10 @@
 package com.tidesdb;
 
 import java.io.Closeable;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Main entry point for a TidesDB database. This class wraps the native TidesDB
@@ -41,6 +45,7 @@ public class TidesDB implements Closeable {
     
     private long nativeHandle;
     private boolean closed = false;
+    private final Set<ColumnFamily> hookBearingCFs = new HashSet<>();
     
     private TidesDB(long nativeHandle) {
         this.nativeHandle = nativeHandle;
@@ -151,9 +156,26 @@ public class TidesDB implements Closeable {
     @Override
     public void close() {
         if (!closed && nativeHandle != 0) {
+            closed = true;
+
+            // Drain all registered hooks.  Loop because a concurrent setCommitHook
+            // may have passed checkOwnerOpen before closed=true but hasn't
+            // registered yet; its registration is rejected (closed is true), but a
+            // retry loop guarantees the set is empty before calling nativeClose.
+            while (true) {
+                List<ColumnFamily> batch;
+                synchronized (hookBearingCFs) {
+                    if (hookBearingCFs.isEmpty()) break;
+                    batch = new ArrayList<>(hookBearingCFs);
+                    hookBearingCFs.clear();
+                }
+                for (ColumnFamily cf : batch) {
+                    cf.clearHookOnClose();
+                }
+            }
+
             nativeClose(nativeHandle);
             nativeHandle = 0;
-            closed = true;
         }
     }
     
@@ -237,7 +259,7 @@ public class TidesDB implements Closeable {
             throw new IllegalArgumentException("Column family name cannot be null or empty");
         }
         long cfHandle = nativeGetColumnFamily(nativeHandle, name);
-        return new ColumnFamily(cfHandle, name);
+        return new ColumnFamily(cfHandle, name, this);
     }
     
     /**
@@ -469,6 +491,31 @@ public class TidesDB implements Closeable {
     private void checkNotClosed() {
         if (closed) {
             throw new IllegalStateException("TidesDB instance is closed");
+        }
+    }
+    
+    /**
+     * Reports whether this database instance has been closed.
+     */
+    boolean isClosed() {
+        return closed;
+    }
+    
+    /**
+     * Registers a column family that has an installed commit hook.
+     */
+    void registerHookColumnFamily(ColumnFamily cf) {
+        synchronized (hookBearingCFs) {
+            if (!closed) hookBearingCFs.add(cf);
+        }
+    }
+    
+    /**
+     * Unregisters a column family whose commit hook has been cleared.
+     */
+    void unregisterHookColumnFamily(ColumnFamily cf) {
+        synchronized (hookBearingCFs) {
+            hookBearingCFs.remove(cf);
         }
     }
     

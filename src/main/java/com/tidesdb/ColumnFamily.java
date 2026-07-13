@@ -38,10 +38,25 @@ public class ColumnFamily {
     private final long nativeHandle;
     private final String name;
     private long commitHookCtxHandle = 0;
+    private final TidesDB owner;
     
     ColumnFamily(long nativeHandle, String name) {
+        this(nativeHandle, name, null);
+    }
+    
+    ColumnFamily(long nativeHandle, String name, TidesDB owner) {
         this.nativeHandle = nativeHandle;
         this.name = name;
+        this.owner = owner;
+    }
+    
+    /**
+     * Checks that the owning database is open. Throws if the owner is closed.
+     */
+    void checkOwnerOpen() {
+        if (owner != null && owner.isClosed()) {
+            throw new IllegalStateException("TidesDB instance is closed");
+        }
     }
     
     /**
@@ -60,6 +75,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the native stats retrieval fails
      */
     public Stats getStats() throws TidesDBException {
+        checkOwnerOpen();
         return nativeGetStats(nativeHandle);
     }
     
@@ -69,6 +85,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the native compaction fails
      */
     public void compact() throws TidesDBException {
+        checkOwnerOpen();
         nativeCompact(nativeHandle);
     }
 
@@ -87,6 +104,7 @@ public class ColumnFamily {
      *                          or the merge fails
      */
     public void compactRange(byte[] startKey, byte[] endKey) throws TidesDBException {
+        checkOwnerOpen();
         nativeCompactRange(nativeHandle, startKey, endKey);
     }
     
@@ -96,6 +114,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the native flush fails
      */
     public void flushMemtable() throws TidesDBException {
+        checkOwnerOpen();
         nativeFlushMemtable(nativeHandle);
     }
     
@@ -105,6 +124,7 @@ public class ColumnFamily {
      * @return true if flushing is in progress
      */
     public boolean isFlushing() {
+        checkOwnerOpen();
         return nativeIsFlushing(nativeHandle);
     }
     
@@ -114,6 +134,7 @@ public class ColumnFamily {
      * @return true if compaction is in progress
      */
     public boolean isCompacting() {
+        checkOwnerOpen();
         return nativeIsCompacting(nativeHandle);
     }
     
@@ -137,6 +158,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the update fails
      */
     public void updateRuntimeConfig(ColumnFamilyConfig config, boolean persistToDisk) throws TidesDBException {
+        checkOwnerOpen();
         if (config == null) {
             throw new IllegalArgumentException("Config cannot be null");
         }
@@ -159,6 +181,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the purge fails
      */
     public void purge() throws TidesDBException {
+        checkOwnerOpen();
         nativePurge(nativeHandle);
     }
     
@@ -169,6 +192,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the WAL sync fails
      */
     public void syncWal() throws TidesDBException {
+        checkOwnerOpen();
         nativeSyncWal(nativeHandle);
     }
     
@@ -184,6 +208,7 @@ public class ColumnFamily {
      * @throws TidesDBException if the estimation fails
      */
     public double rangeCost(byte[] keyA, byte[] keyB) throws TidesDBException {
+        checkOwnerOpen();
         if (keyA == null || keyA.length == 0) {
             throw new IllegalArgumentException("keyA cannot be null or empty");
         }
@@ -206,10 +231,15 @@ public class ColumnFamily {
      * @throws TidesDBException if the hook cannot be set
      */
     public void setCommitHook(CommitHook hook) throws TidesDBException {
+        checkOwnerOpen();
         if (hook == null) {
             throw new IllegalArgumentException("Hook cannot be null, use clearCommitHook() instead");
         }
+        boolean firstInstall = (commitHookCtxHandle == 0);
         commitHookCtxHandle = nativeSetCommitHook(nativeHandle, hook, commitHookCtxHandle);
+        if (firstInstall && owner != null) {
+            owner.registerHookColumnFamily(this);
+        }
     }
     
     /**
@@ -219,7 +249,26 @@ public class ColumnFamily {
      * @throws TidesDBException if the hook cannot be cleared
      */
     public void clearCommitHook() throws TidesDBException {
+        checkOwnerOpen();
         commitHookCtxHandle = nativeSetCommitHook(nativeHandle, null, commitHookCtxHandle);
+        if (owner != null) {
+            owner.unregisterHookColumnFamily(this);
+        }
+    }
+    
+    /**
+     * Best-effort hook detach during database close. The hook is removed from
+     * the engine without caller interaction. Errors are swallowed.
+     */
+    void clearHookOnClose() {
+        if (commitHookCtxHandle != 0) {
+            try {
+                nativeSetCommitHook(nativeHandle, null, commitHookCtxHandle);
+            } catch (TidesDBException ignored) {
+                // Best-effort during shutdown.
+            }
+            commitHookCtxHandle = 0;
+        }
     }
     
     long getNativeHandle() {

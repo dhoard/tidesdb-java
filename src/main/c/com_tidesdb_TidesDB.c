@@ -17,6 +17,7 @@
  * limitations under the License.
  */
 #include <jni.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tidesdb/db.h>
@@ -219,10 +220,9 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeObjstoreS3Create(
     tdb_s3_create_config_fn create_fn = resolve_s3_create_config();
     if (create_fn == NULL)
     {
-        throwTidesDBException(
-            env, TDB_ERR_INVALID_ARGS,
-            "TidesDB was built without S3 support (rebuild the core library with "
-            "TIDESDB_WITH_S3=ON)");
+        throwTidesDBException(env, TDB_ERR_INVALID_ARGS,
+                              "TidesDB was built without S3 support (rebuild the core library with "
+                              "TIDESDB_WITH_S3=ON)");
         return 0;
     }
 
@@ -236,19 +236,18 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeObjstoreS3Create(
     const char *c_region = region ? (*env)->GetStringUTFChars(env, region, NULL) : NULL;
     const char *c_ca = tlsCaPath ? (*env)->GetStringUTFChars(env, tlsCaPath, NULL) : NULL;
 
-    tidesdb_objstore_s3_config_t cfg = {
-        .endpoint = c_endpoint,
-        .bucket = c_bucket,
-        .prefix = c_prefix,
-        .access_key = c_access,
-        .secret_key = c_secret,
-        .region = c_region,
-        .use_ssl = useSsl ? 1 : 0,
-        .use_path_style = usePathStyle ? 1 : 0,
-        .tls_ca_path = c_ca,
-        .tls_insecure_skip_verify = tlsInsecureSkipVerify ? 1 : 0,
-        .multipart_threshold = (size_t)multipartThreshold,
-        .multipart_part_size = (size_t)multipartPartSize};
+    tidesdb_objstore_s3_config_t cfg = {.endpoint = c_endpoint,
+                                        .bucket = c_bucket,
+                                        .prefix = c_prefix,
+                                        .access_key = c_access,
+                                        .secret_key = c_secret,
+                                        .region = c_region,
+                                        .use_ssl = useSsl ? 1 : 0,
+                                        .use_path_style = usePathStyle ? 1 : 0,
+                                        .tls_ca_path = c_ca,
+                                        .tls_insecure_skip_verify = tlsInsecureSkipVerify ? 1 : 0,
+                                        .multipart_threshold = (size_t)multipartThreshold,
+                                        .multipart_part_size = (size_t)multipartPartSize};
 
     tidesdb_objstore_t *connector = create_fn(&cfg);
 
@@ -287,9 +286,8 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativeCreateColumnFamily(
     jboolean enableBlockIndexes, jint indexSampleRatio, jint blockIndexPrefixLen, jint syncMode,
     jlong syncIntervalUs, jstring comparatorName, jint skipListMaxLevel, jfloat skipListProbability,
     jint defaultIsolationLevel, jlong minDiskSpace, jint l1FileCountTrigger,
-    jint l0QueueStallThreshold, jdouble tombstoneDensityTrigger,
-    jlong tombstoneDensityMinEntries, jboolean useBtree,
-    jboolean objectLazyCompaction, jboolean objectPrefetchCompaction)
+    jint l0QueueStallThreshold, jdouble tombstoneDensityTrigger, jlong tombstoneDensityMinEntries,
+    jboolean useBtree, jboolean objectLazyCompaction, jboolean objectPrefetchCompaction)
 {
     tidesdb_t *db = (tidesdb_t *)(uintptr_t)handle;
     const char *cfName = (*env)->GetStringUTFChars(env, name, NULL);
@@ -559,9 +557,9 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativeCheckpoint(JNIEnv *env, jc
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativeRenameColumnFamily(JNIEnv *env, jclass cls,
-                                                                          jlong handle,
-                                                                          jstring oldName,
-                                                                          jstring newName)
+                                                                         jlong handle,
+                                                                         jstring oldName,
+                                                                         jstring newName)
 {
     tidesdb_t *db = (tidesdb_t *)(uintptr_t)handle;
     const char *oldCfName = (*env)->GetStringUTFChars(env, oldName, NULL);
@@ -695,25 +693,17 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_ColumnFamily_nativeGetStats(JNIEnv *e
         jstring comparatorName = (*env)->NewStringUTF(env, stats->config->comparator_name);
 
         cfConfigObj = (*env)->CallStaticObjectMethod(
-            env, cfConfigClass, fromNative,
-            (jlong)stats->config->write_buffer_size,
-            (jlong)stats->config->level_size_ratio,
-            (jint)stats->config->min_levels,
-            (jint)stats->config->dividing_level_offset,
-            (jlong)stats->config->klog_value_threshold,
+            env, cfConfigClass, fromNative, (jlong)stats->config->write_buffer_size,
+            (jlong)stats->config->level_size_ratio, (jint)stats->config->min_levels,
+            (jint)stats->config->dividing_level_offset, (jlong)stats->config->klog_value_threshold,
             (jint)stats->config->compression_algorithm,
             stats->config->enable_bloom_filter != 0 ? JNI_TRUE : JNI_FALSE,
             (jdouble)stats->config->bloom_fpr,
             stats->config->enable_block_indexes != 0 ? JNI_TRUE : JNI_FALSE,
-            (jint)stats->config->index_sample_ratio,
-            (jint)stats->config->block_index_prefix_len,
-            (jint)stats->config->sync_mode,
-            (jlong)stats->config->sync_interval_us,
-            comparatorName,
-            (jint)stats->config->skip_list_max_level,
-            (jfloat)stats->config->skip_list_probability,
-            (jint)stats->config->default_isolation_level,
-            (jlong)stats->config->min_disk_space,
+            (jint)stats->config->index_sample_ratio, (jint)stats->config->block_index_prefix_len,
+            (jint)stats->config->sync_mode, (jlong)stats->config->sync_interval_us, comparatorName,
+            (jint)stats->config->skip_list_max_level, (jfloat)stats->config->skip_list_probability,
+            (jint)stats->config->default_isolation_level, (jlong)stats->config->min_disk_space,
             (jint)stats->config->l1_file_count_trigger,
             (jint)stats->config->l0_queue_stall_threshold,
             (jdouble)stats->config->tombstone_density_trigger,
@@ -727,29 +717,21 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_ColumnFamily_nativeGetStats(JNIEnv *e
     }
 
     jclass statsClass = (*env)->FindClass(env, "com/tidesdb/Stats");
-    jmethodID constructor = (*env)->GetMethodID(env, statsClass, "<init>",
-                                                "(IJ[J[ILcom/tidesdb/ColumnFamilyConfig;JJDD[JDDZJIDJD[JDIJJJJJJJ)V");
+    jmethodID constructor =
+        (*env)->GetMethodID(env, statsClass, "<init>",
+                            "(IJ[J[ILcom/tidesdb/ColumnFamilyConfig;JJDD[JDDZJIDJD[JDIJJJJJJJ)V");
 
-    jobject statsObj = (*env)->NewObject(env, statsClass, constructor, stats->num_levels,
-                                         (jlong)stats->memtable_size, levelSizes, levelNumSSTables,
-                                         cfConfigObj, (jlong)stats->total_keys,
-                                         (jlong)stats->total_data_size,
-                                         stats->avg_key_size, stats->avg_value_size, levelKeyCounts,
-                                         stats->read_amp, stats->hit_rate,
-                                         stats->use_btree != 0, (jlong)stats->btree_total_nodes,
-                                         (jint)stats->btree_max_height, stats->btree_avg_height,
-                                         (jlong)stats->total_tombstones,
-                                         (jdouble)stats->tombstone_ratio,
-                                         levelTombstoneCounts,
-                                         (jdouble)stats->max_sst_density,
-                                         (jint)stats->max_sst_density_level,
-                                         (jlong)stats->wal_bytes_written,
-                                         (jlong)stats->flush_bytes_written,
-                                         (jlong)stats->compaction_bytes_written,
-                                         (jlong)stats->compaction_bytes_read,
-                                         (jlong)stats->user_bytes_written,
-                                         (jlong)stats->flush_count,
-                                         (jlong)stats->compaction_count);
+    jobject statsObj = (*env)->NewObject(
+        env, statsClass, constructor, stats->num_levels, (jlong)stats->memtable_size, levelSizes,
+        levelNumSSTables, cfConfigObj, (jlong)stats->total_keys, (jlong)stats->total_data_size,
+        stats->avg_key_size, stats->avg_value_size, levelKeyCounts, stats->read_amp,
+        stats->hit_rate, stats->use_btree != 0, (jlong)stats->btree_total_nodes,
+        (jint)stats->btree_max_height, stats->btree_avg_height, (jlong)stats->total_tombstones,
+        (jdouble)stats->tombstone_ratio, levelTombstoneCounts, (jdouble)stats->max_sst_density,
+        (jint)stats->max_sst_density_level, (jlong)stats->wal_bytes_written,
+        (jlong)stats->flush_bytes_written, (jlong)stats->compaction_bytes_written,
+        (jlong)stats->compaction_bytes_read, (jlong)stats->user_bytes_written,
+        (jlong)stats->flush_count, (jlong)stats->compaction_count);
 
     tidesdb_free_stats(stats);
 
@@ -942,8 +924,7 @@ JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativeDelete(JNIEnv *env, jc
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_Transaction_nativeSingleDelete(JNIEnv *env, jclass cls,
-                                                                       jlong handle,
-                                                                       jlong cfHandle,
+                                                                       jlong handle, jlong cfHandle,
                                                                        jbyteArray key)
 {
     tidesdb_txn_t *txn = (tidesdb_txn_t *)(uintptr_t)handle;
@@ -1221,33 +1202,82 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDBIterator_nativeFree(JNIEnv *env, 
 /**
  * Context stored as the commit hook ctx pointer.
  * Holds the JavaVM and a global reference to the Java CommitHook object.
+ * Uses reference-counted quiescent retirement to avoid use-after-free.
  */
 typedef struct
 {
     JavaVM *jvm;
     jobject hook_obj; /* global reference to CommitHook */
+    int refcount;     /* callback reference count */
+    int retired;      /* 0 = active, 1 = retired (do not enter) */
+    pthread_mutex_t lock;
+    pthread_cond_t zero_cond;
 } java_hook_ctx_t;
+
+/**
+ * Retires and destroys a hook context. Waits for in-flight callbacks to drain,
+ * then deletes the global reference and frees the context.
+ * Must only be called after the context has been detached from tidesdb (i.e.,
+ * after tidesdb_cf_set_commit_hook has replaced it).
+ */
+static void retire_and_destroy_hook_ctx(JNIEnv *env, java_hook_ctx_t *ctx)
+{
+    if (ctx == NULL) return;
+
+    pthread_mutex_lock(&ctx->lock);
+    ctx->retired = 1;
+    while (ctx->refcount > 0)
+    {
+        pthread_cond_wait(&ctx->zero_cond, &ctx->lock);
+    }
+    pthread_mutex_unlock(&ctx->lock);
+
+    (*env)->DeleteGlobalRef(env, ctx->hook_obj);
+    pthread_mutex_destroy(&ctx->lock);
+    pthread_cond_destroy(&ctx->zero_cond);
+    free(ctx);
+}
 
 /**
  * C trampoline that bridges the tidesdb_commit_hook_fn callback to the Java CommitHook.onCommit
  * method. Fires synchronously on the committing thread (which is always a Java thread).
  */
 static int java_commit_hook_trampoline(const tidesdb_commit_op_t *ops, int num_ops,
-                                        uint64_t commit_seq, void *ctx)
+                                       uint64_t commit_seq, void *ctx)
 {
     java_hook_ctx_t *hctx = (java_hook_ctx_t *)ctx;
     JNIEnv *env = NULL;
     int need_detach = 0;
 
+    /* Check if context is retired under lock, increment refcount if active */
+    pthread_mutex_lock(&hctx->lock);
+    if (hctx->retired)
+    {
+        pthread_mutex_unlock(&hctx->lock);
+        return -1;
+    }
+    hctx->refcount++;
+    pthread_mutex_unlock(&hctx->lock);
+
     jint rc = (*hctx->jvm)->GetEnv(hctx->jvm, (void **)&env, JNI_VERSION_1_6);
     if (rc == JNI_EDETACHED)
     {
         if ((*hctx->jvm)->AttachCurrentThread(hctx->jvm, (void **)&env, NULL) != 0)
+        {
+            pthread_mutex_lock(&hctx->lock);
+            hctx->refcount--;
+            if (hctx->refcount == 0 && hctx->retired) pthread_cond_signal(&hctx->zero_cond);
+            pthread_mutex_unlock(&hctx->lock);
             return -1;
+        }
         need_detach = 1;
     }
     else if (rc != JNI_OK)
     {
+        pthread_mutex_lock(&hctx->lock);
+        hctx->refcount--;
+        if (hctx->refcount == 0 && hctx->retired) pthread_cond_signal(&hctx->zero_cond);
+        pthread_mutex_unlock(&hctx->lock);
         return -1;
     }
 
@@ -1255,17 +1285,14 @@ static int java_commit_hook_trampoline(const tidesdb_commit_op_t *ops, int num_o
 
     /* Find CommitOp class and constructor: CommitOp(byte[], byte[], long, boolean) */
     jclass commitOpClass = (*env)->FindClass(env, "com/tidesdb/CommitOp");
-    if (commitOpClass == NULL)
-        goto cleanup;
+    if (commitOpClass == NULL) goto cleanup;
 
     jmethodID ctor = (*env)->GetMethodID(env, commitOpClass, "<init>", "([B[BJZ)V");
-    if (ctor == NULL)
-        goto cleanup;
+    if (ctor == NULL) goto cleanup;
 
     /* Create CommitOp[] array */
     jobjectArray opsArray = (*env)->NewObjectArray(env, num_ops, commitOpClass, NULL);
-    if (opsArray == NULL)
-        goto cleanup;
+    if (opsArray == NULL) goto cleanup;
 
     for (int i = 0; i < num_ops; i++)
     {
@@ -1280,15 +1307,13 @@ static int java_commit_hook_trampoline(const tidesdb_commit_op_t *ops, int num_o
                                        (jbyte *)ops[i].value);
         }
 
-        jobject opObj = (*env)->NewObject(env, commitOpClass, ctor, jkey, jvalue,
-                                          (jlong)ops[i].ttl,
+        jobject opObj = (*env)->NewObject(env, commitOpClass, ctor, jkey, jvalue, (jlong)ops[i].ttl,
                                           ops[i].is_delete ? JNI_TRUE : JNI_FALSE);
         (*env)->SetObjectArrayElement(env, opsArray, i, opObj);
 
         (*env)->DeleteLocalRef(env, opObj);
         (*env)->DeleteLocalRef(env, jkey);
-        if (jvalue != NULL)
-            (*env)->DeleteLocalRef(env, jvalue);
+        if (jvalue != NULL) (*env)->DeleteLocalRef(env, jvalue);
     }
 
     /* Call CommitHook.onCommit(CommitOp[], long) */
@@ -1308,33 +1333,35 @@ static int java_commit_hook_trampoline(const tidesdb_commit_op_t *ops, int num_o
     (*env)->DeleteLocalRef(env, commitOpClass);
     (*env)->DeleteLocalRef(env, hookClass);
 
-    if (need_detach)
-        (*hctx->jvm)->DetachCurrentThread(hctx->jvm);
+    if (need_detach) (*hctx->jvm)->DetachCurrentThread(hctx->jvm);
+
+    /* Decrement refcount and signal if retiring */
+    pthread_mutex_lock(&hctx->lock);
+    hctx->refcount--;
+    if (hctx->refcount == 0 && hctx->retired) pthread_cond_signal(&hctx->zero_cond);
+    pthread_mutex_unlock(&hctx->lock);
 
     return (int)ret;
 
 cleanup:
-    if ((*env)->ExceptionCheck(env))
-        (*env)->ExceptionClear(env);
-    if (need_detach)
-        (*hctx->jvm)->DetachCurrentThread(hctx->jvm);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (need_detach) (*hctx->jvm)->DetachCurrentThread(hctx->jvm);
+
+    /* Decrement refcount and signal if retiring */
+    pthread_mutex_lock(&hctx->lock);
+    hctx->refcount--;
+    if (hctx->refcount == 0 && hctx->retired) pthread_cond_signal(&hctx->zero_cond);
+    pthread_mutex_unlock(&hctx->lock);
+
     return -1;
 }
 
 JNIEXPORT jlong JNICALL Java_com_tidesdb_ColumnFamily_nativeSetCommitHook(JNIEnv *env, jclass cls,
-                                                                           jlong cfHandle,
-                                                                           jobject hook,
-                                                                           jlong oldCtxHandle)
+                                                                          jlong cfHandle,
+                                                                          jobject hook,
+                                                                          jlong oldCtxHandle)
 {
     tidesdb_column_family_t *cf = (tidesdb_column_family_t *)(uintptr_t)cfHandle;
-
-    /* Free old context if present */
-    if (oldCtxHandle != 0)
-    {
-        java_hook_ctx_t *old_ctx = (java_hook_ctx_t *)(uintptr_t)oldCtxHandle;
-        (*env)->DeleteGlobalRef(env, old_ctx->hook_obj);
-        free(old_ctx);
-    }
 
     /* If hook is NULL, clear the hook */
     if (hook == NULL)
@@ -1343,35 +1370,77 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_ColumnFamily_nativeSetCommitHook(JNIEnv
         if (result != TDB_SUCCESS)
         {
             throwTidesDBException(env, result, getErrorMessage(result));
+            return oldCtxHandle; /* old context remains active */
         }
+
+        /* Retire old context after successful detachment */
+        if (oldCtxHandle != 0)
+        {
+            java_hook_ctx_t *old_ctx = (java_hook_ctx_t *)(uintptr_t)oldCtxHandle;
+            retire_and_destroy_hook_ctx(env, old_ctx);
+        }
+
         return 0;
     }
 
     /* Allocate new context */
-    java_hook_ctx_t *ctx = (java_hook_ctx_t *)malloc(sizeof(java_hook_ctx_t));
-    if (ctx == NULL)
+    java_hook_ctx_t *new_ctx = (java_hook_ctx_t *)malloc(sizeof(java_hook_ctx_t));
+    if (new_ctx == NULL)
     {
         throwTidesDBException(env, TDB_ERR_MEMORY, "Failed to allocate commit hook context");
-        return 0;
+        return oldCtxHandle; /* old context remains active */
     }
 
-    (*env)->GetJavaVM(env, &ctx->jvm);
-    ctx->hook_obj = (*env)->NewGlobalRef(env, hook);
+    /* Initialize refcount and retired flag */
+    new_ctx->refcount = 0;
+    new_ctx->retired = 0;
+    pthread_mutex_init(&new_ctx->lock, NULL);
+    pthread_cond_init(&new_ctx->zero_cond, NULL);
 
-    int result = tidesdb_cf_set_commit_hook(cf, java_commit_hook_trampoline, ctx);
+    if ((*env)->GetJavaVM(env, &new_ctx->jvm) != 0)
+    {
+        pthread_mutex_destroy(&new_ctx->lock);
+        pthread_cond_destroy(&new_ctx->zero_cond);
+        free(new_ctx);
+        throwTidesDBException(env, TDB_ERR_MEMORY, "Failed to get JavaVM");
+        return oldCtxHandle;
+    }
+
+    new_ctx->hook_obj = (*env)->NewGlobalRef(env, hook);
+    if (new_ctx->hook_obj == NULL)
+    {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        pthread_mutex_destroy(&new_ctx->lock);
+        pthread_cond_destroy(&new_ctx->zero_cond);
+        free(new_ctx);
+        throwTidesDBException(env, TDB_ERR_MEMORY,
+                              "Failed to create global reference for commit hook");
+        return oldCtxHandle;
+    }
+
+    int result = tidesdb_cf_set_commit_hook(cf, java_commit_hook_trampoline, new_ctx);
     if (result != TDB_SUCCESS)
     {
-        (*env)->DeleteGlobalRef(env, ctx->hook_obj);
-        free(ctx);
+        (*env)->DeleteGlobalRef(env, new_ctx->hook_obj);
+        pthread_mutex_destroy(&new_ctx->lock);
+        pthread_cond_destroy(&new_ctx->zero_cond);
+        free(new_ctx);
         throwTidesDBException(env, result, getErrorMessage(result));
-        return 0;
+        return oldCtxHandle; /* old context remains active */
     }
 
-    return (jlong)(uintptr_t)ctx;
+    /* Retire old context after successful hook replacement */
+    if (oldCtxHandle != 0)
+    {
+        java_hook_ctx_t *old_ctx = (java_hook_ctx_t *)(uintptr_t)oldCtxHandle;
+        retire_and_destroy_hook_ctx(env, old_ctx);
+    }
+
+    return (jlong)(uintptr_t)new_ctx;
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamily_nativePurge(JNIEnv *env, jclass cls,
-                                                                  jlong handle)
+                                                                 jlong handle)
 {
     tidesdb_column_family_t *cf = (tidesdb_column_family_t *)(uintptr_t)handle;
     int result = tidesdb_purge_cf(cf);
@@ -1383,7 +1452,7 @@ JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamily_nativePurge(JNIEnv *env, jc
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamily_nativeSyncWal(JNIEnv *env, jclass cls,
-                                                                    jlong handle)
+                                                                   jlong handle)
 {
     tidesdb_column_family_t *cf = (tidesdb_column_family_t *)(uintptr_t)handle;
     int result = tidesdb_sync_wal(cf);
@@ -1406,7 +1475,7 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativePurge(JNIEnv *env, jclass 
 }
 
 JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetDbStats(JNIEnv *env, jclass cls,
-                                                                     jlong handle)
+                                                                    jlong handle)
 {
     tidesdb_t *db = (tidesdb_t *)(uintptr_t)handle;
     tidesdb_db_stats_t db_stats;
@@ -1426,9 +1495,9 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetDbStats(JNIEnv *env,
        boolean, String, long, long, int, long, long, long, long, boolean,
        long (primaryEpoch), long (seenEpoch),
        long, long, long, long, long, long, long, long */
-    jmethodID constructor = (*env)->GetMethodID(
-        env, dbStatsClass, "<init>",
-        "(IJJJIIJIIJIJJJJZJIZIJZLjava/lang/String;JJIJJJJZJJJJJJJJJJ)V");
+    jmethodID constructor =
+        (*env)->GetMethodID(env, dbStatsClass, "<init>",
+                            "(IJJJIIJIIJIJJJJZJIZIJZLjava/lang/String;JJIJJJJZJJJJJJJJJJ)V");
 
     jstring connectorStr = NULL;
     if (db_stats.object_store_connector != NULL)
@@ -1436,54 +1505,33 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDB_nativeGetDbStats(JNIEnv *env,
         connectorStr = (*env)->NewStringUTF(env, db_stats.object_store_connector);
     }
 
-    return (*env)->NewObject(env, dbStatsClass, constructor,
-                             (jint)db_stats.num_column_families,
-                             (jlong)db_stats.total_memory,
-                             (jlong)db_stats.available_memory,
-                             (jlong)db_stats.resolved_memory_limit,
-                             (jint)db_stats.memory_pressure_level,
-                             (jint)db_stats.flush_pending_count,
-                             (jlong)db_stats.total_memtable_bytes,
-                             (jint)db_stats.total_immutable_count,
-                             (jint)db_stats.total_sstable_count,
-                             (jlong)db_stats.total_data_size_bytes,
-                             (jint)db_stats.num_open_sstables,
-                             (jlong)db_stats.global_seq,
-                             (jlong)db_stats.txn_memory_bytes,
-                             (jlong)db_stats.compaction_queue_size,
-                             (jlong)db_stats.flush_queue_size,
-                             db_stats.unified_memtable_enabled != 0,
-                             (jlong)db_stats.unified_memtable_bytes,
-                             (jint)db_stats.unified_immutable_count,
-                             db_stats.unified_is_flushing != 0,
-                             (jint)db_stats.unified_next_cf_index,
-                             (jlong)db_stats.unified_wal_generation,
-                             db_stats.object_store_enabled != 0,
-                             connectorStr,
-                             (jlong)db_stats.local_cache_bytes_used,
-                             (jlong)db_stats.local_cache_bytes_max,
-                             (jint)db_stats.local_cache_num_files,
-                             (jlong)db_stats.last_uploaded_generation,
-                             (jlong)db_stats.upload_queue_depth,
-                             (jlong)db_stats.total_uploads,
-                             (jlong)db_stats.total_upload_failures,
-                             db_stats.replica_mode != 0,
-                             (jlong)db_stats.primary_epoch,
-                             (jlong)db_stats.seen_epoch,
-                             (jlong)db_stats.uwal_bytes_written,
-                             (jlong)db_stats.wal_bytes_written,
-                             (jlong)db_stats.flush_bytes_written,
-                             (jlong)db_stats.compaction_bytes_written,
-                             (jlong)db_stats.compaction_bytes_read,
-                             (jlong)db_stats.user_bytes_written,
-                             (jlong)db_stats.flush_count,
-                             (jlong)db_stats.compaction_count);
+    return (*env)->NewObject(
+        env, dbStatsClass, constructor, (jint)db_stats.num_column_families,
+        (jlong)db_stats.total_memory, (jlong)db_stats.available_memory,
+        (jlong)db_stats.resolved_memory_limit, (jint)db_stats.memory_pressure_level,
+        (jint)db_stats.flush_pending_count, (jlong)db_stats.total_memtable_bytes,
+        (jint)db_stats.total_immutable_count, (jint)db_stats.total_sstable_count,
+        (jlong)db_stats.total_data_size_bytes, (jint)db_stats.num_open_sstables,
+        (jlong)db_stats.global_seq, (jlong)db_stats.txn_memory_bytes,
+        (jlong)db_stats.compaction_queue_size, (jlong)db_stats.flush_queue_size,
+        db_stats.unified_memtable_enabled != 0, (jlong)db_stats.unified_memtable_bytes,
+        (jint)db_stats.unified_immutable_count, db_stats.unified_is_flushing != 0,
+        (jint)db_stats.unified_next_cf_index, (jlong)db_stats.unified_wal_generation,
+        db_stats.object_store_enabled != 0, connectorStr, (jlong)db_stats.local_cache_bytes_used,
+        (jlong)db_stats.local_cache_bytes_max, (jint)db_stats.local_cache_num_files,
+        (jlong)db_stats.last_uploaded_generation, (jlong)db_stats.upload_queue_depth,
+        (jlong)db_stats.total_uploads, (jlong)db_stats.total_upload_failures,
+        db_stats.replica_mode != 0, (jlong)db_stats.primary_epoch, (jlong)db_stats.seen_epoch,
+        (jlong)db_stats.uwal_bytes_written, (jlong)db_stats.wal_bytes_written,
+        (jlong)db_stats.flush_bytes_written, (jlong)db_stats.compaction_bytes_written,
+        (jlong)db_stats.compaction_bytes_read, (jlong)db_stats.user_bytes_written,
+        (jlong)db_stats.flush_count, (jlong)db_stats.compaction_count);
 }
 
 JNIEXPORT jdouble JNICALL Java_com_tidesdb_ColumnFamily_nativeRangeCost(JNIEnv *env, jclass cls,
-                                                                         jlong handle,
-                                                                         jbyteArray keyA,
-                                                                         jbyteArray keyB)
+                                                                        jlong handle,
+                                                                        jbyteArray keyA,
+                                                                        jbyteArray keyB)
 {
     tidesdb_column_family_t *cf = (tidesdb_column_family_t *)(uintptr_t)handle;
 
@@ -1494,8 +1542,8 @@ JNIEXPORT jdouble JNICALL Java_com_tidesdb_ColumnFamily_nativeRangeCost(JNIEnv *
     jbyte *keyBBytes = (*env)->GetByteArrayElements(env, keyB, NULL);
 
     double cost = 0.0;
-    int result = tidesdb_range_cost(cf, (uint8_t *)keyABytes, keyALen, (uint8_t *)keyBBytes,
-                                    keyBLen, &cost);
+    int result =
+        tidesdb_range_cost(cf, (uint8_t *)keyABytes, keyALen, (uint8_t *)keyBBytes, keyBLen, &cost);
 
     (*env)->ReleaseByteArrayElements(env, keyA, keyABytes, JNI_ABORT);
     (*env)->ReleaseByteArrayElements(env, keyB, keyBBytes, JNI_ABORT);
@@ -1510,8 +1558,8 @@ JNIEXPORT jdouble JNICALL Java_com_tidesdb_ColumnFamily_nativeRangeCost(JNIEnv *
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativeDeleteColumnFamily(JNIEnv *env, jclass cls,
-                                                                          jlong handle,
-                                                                          jlong cfHandle)
+                                                                         jlong handle,
+                                                                         jlong cfHandle)
 {
     tidesdb_t *db = (tidesdb_t *)(uintptr_t)handle;
     tidesdb_column_family_t *cf = (tidesdb_column_family_t *)(uintptr_t)cfHandle;
@@ -1525,7 +1573,7 @@ JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativeDeleteColumnFamily(JNIEnv 
 }
 
 JNIEXPORT void JNICALL Java_com_tidesdb_TidesDB_nativePromoteToPrimary(JNIEnv *env, jclass cls,
-                                                                        jlong handle)
+                                                                       jlong handle)
 {
     tidesdb_t *db = (tidesdb_t *)(uintptr_t)handle;
 
@@ -1557,21 +1605,21 @@ JNIEXPORT jlong JNICALL Java_com_tidesdb_TidesDB_nativeRaiseOpenFileLimit(JNIEnv
 }
 
 JNIEXPORT jint JNICALL Java_com_tidesdb_Config_nativeDefaultMaxConcurrentFlushes(JNIEnv *env,
-                                                                                  jclass cls)
+                                                                                 jclass cls)
 {
     tidesdb_config_t cfg = tidesdb_default_config();
     return (jint)cfg.max_concurrent_flushes;
 }
 
-JNIEXPORT jdouble JNICALL Java_com_tidesdb_ColumnFamilyConfig_nativeDefaultTombstoneDensityTrigger(
-    JNIEnv *env, jclass cls)
+JNIEXPORT jdouble JNICALL
+Java_com_tidesdb_ColumnFamilyConfig_nativeDefaultTombstoneDensityTrigger(JNIEnv *env, jclass cls)
 {
     tidesdb_column_family_config_t cfg = tidesdb_default_column_family_config();
     return (jdouble)cfg.tombstone_density_trigger;
 }
 
-JNIEXPORT jlong JNICALL Java_com_tidesdb_ColumnFamilyConfig_nativeDefaultTombstoneDensityMinEntries(
-    JNIEnv *env, jclass cls)
+JNIEXPORT jlong JNICALL
+Java_com_tidesdb_ColumnFamilyConfig_nativeDefaultTombstoneDensityMinEntries(JNIEnv *env, jclass cls)
 {
     tidesdb_column_family_config_t cfg = tidesdb_default_column_family_config();
     return (jlong)cfg.tombstone_density_min_entries;
@@ -1598,18 +1646,16 @@ static jobject buildCfConfigObject(JNIEnv *env, const tidesdb_column_family_conf
     jstring comparatorName = (*env)->NewStringUTF(env, cfg->comparator_name);
 
     jobject obj = (*env)->CallStaticObjectMethod(
-        env, cfConfigClass, fromNative,
-        (jlong)cfg->write_buffer_size, (jlong)cfg->level_size_ratio, (jint)cfg->min_levels,
-        (jint)cfg->dividing_level_offset, (jlong)cfg->klog_value_threshold,
-        (jint)cfg->compression_algorithm,
-        cfg->enable_bloom_filter != 0 ? JNI_TRUE : JNI_FALSE, (jdouble)cfg->bloom_fpr,
-        cfg->enable_block_indexes != 0 ? JNI_TRUE : JNI_FALSE, (jint)cfg->index_sample_ratio,
-        (jint)cfg->block_index_prefix_len, (jint)cfg->sync_mode, (jlong)cfg->sync_interval_us,
-        comparatorName, (jint)cfg->skip_list_max_level, (jfloat)cfg->skip_list_probability,
-        (jint)cfg->default_isolation_level, (jlong)cfg->min_disk_space,
-        (jint)cfg->l1_file_count_trigger, (jint)cfg->l0_queue_stall_threshold,
-        (jdouble)cfg->tombstone_density_trigger, (jlong)cfg->tombstone_density_min_entries,
-        cfg->use_btree != 0 ? JNI_TRUE : JNI_FALSE,
+        env, cfConfigClass, fromNative, (jlong)cfg->write_buffer_size, (jlong)cfg->level_size_ratio,
+        (jint)cfg->min_levels, (jint)cfg->dividing_level_offset, (jlong)cfg->klog_value_threshold,
+        (jint)cfg->compression_algorithm, cfg->enable_bloom_filter != 0 ? JNI_TRUE : JNI_FALSE,
+        (jdouble)cfg->bloom_fpr, cfg->enable_block_indexes != 0 ? JNI_TRUE : JNI_FALSE,
+        (jint)cfg->index_sample_ratio, (jint)cfg->block_index_prefix_len, (jint)cfg->sync_mode,
+        (jlong)cfg->sync_interval_us, comparatorName, (jint)cfg->skip_list_max_level,
+        (jfloat)cfg->skip_list_probability, (jint)cfg->default_isolation_level,
+        (jlong)cfg->min_disk_space, (jint)cfg->l1_file_count_trigger,
+        (jint)cfg->l0_queue_stall_threshold, (jdouble)cfg->tombstone_density_trigger,
+        (jlong)cfg->tombstone_density_min_entries, cfg->use_btree != 0 ? JNI_TRUE : JNI_FALSE,
         cfg->object_lazy_compaction != 0 ? JNI_TRUE : JNI_FALSE,
         cfg->object_prefetch_compaction != 0 ? JNI_TRUE : JNI_FALSE);
 
@@ -1696,8 +1742,10 @@ JNIEXPORT void JNICALL Java_com_tidesdb_ColumnFamilyConfig_nativeSaveToIni(
     }
 }
 
-JNIEXPORT jobject JNICALL Java_com_tidesdb_ColumnFamilyConfig_nativeLoadFromIni(
-    JNIEnv *env, jclass cls, jstring iniFile, jstring sectionName)
+JNIEXPORT jobject JNICALL Java_com_tidesdb_ColumnFamilyConfig_nativeLoadFromIni(JNIEnv *env,
+                                                                                jclass cls,
+                                                                                jstring iniFile,
+                                                                                jstring sectionName)
 {
     const char *ini = (*env)->GetStringUTFChars(env, iniFile, NULL);
     if (ini == NULL)
@@ -1731,7 +1779,7 @@ JNIEXPORT jobject JNICALL Java_com_tidesdb_ColumnFamilyConfig_nativeLoadFromIni(
 }
 
 JNIEXPORT jobject JNICALL Java_com_tidesdb_TidesDBIterator_nativeKeyValue(JNIEnv *env, jclass cls,
-                                                                           jlong handle)
+                                                                          jlong handle)
 {
     tidesdb_iter_t *iter = (tidesdb_iter_t *)(uintptr_t)handle;
     uint8_t *key = NULL;

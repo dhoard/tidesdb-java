@@ -3070,4 +3070,281 @@ public class TidesDBTest {
             assertNotNull(cacheStats, "getCacheStats should return non-null");
         }
     }
+
+    @Test
+    @Order(79)
+    void testIteratorSeekNullAndEmptyKey() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_iter_seek_null").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("test_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "k".getBytes(), "v".getBytes());
+                txn.commit();
+            }
+
+            try (Transaction txn = db.beginTransaction()) {
+                try (TidesDBIterator iter = txn.newIterator(cf)) {
+                    assertThrows(IllegalArgumentException.class, () -> iter.seek(null));
+                    assertThrows(IllegalArgumentException.class, () -> iter.seek(new byte[0]));
+                    assertThrows(IllegalArgumentException.class, () -> iter.seekForPrev(null));
+                    assertThrows(IllegalArgumentException.class, () -> iter.seekForPrev(new byte[0]));
+                }
+            }
+        }
+    }
+
+    @Test
+    @Order(80)
+    void testIteratorOperationsAfterFree() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_iter_after_free").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("test_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "k".getBytes(), "v".getBytes());
+                txn.commit();
+            }
+
+            try (Transaction txn = db.beginTransaction()) {
+                TidesDBIterator iter = txn.newIterator(cf);
+                iter.seekToFirst();
+                assertTrue(iter.isValid());
+                iter.free();
+
+                // isValid returns false after free
+                assertFalse(iter.isValid());
+
+                // All operations throw IllegalStateException after free
+                assertThrows(IllegalStateException.class, iter::seekToFirst);
+                assertThrows(IllegalStateException.class, iter::seekToLast);
+                assertThrows(IllegalStateException.class, () -> iter.seek("k".getBytes()));
+                assertThrows(IllegalStateException.class, () -> iter.seekForPrev("k".getBytes()));
+                assertThrows(IllegalStateException.class, iter::next);
+                assertThrows(IllegalStateException.class, iter::prev);
+                assertThrows(IllegalStateException.class, iter::key);
+                assertThrows(IllegalStateException.class, iter::value);
+                assertThrows(IllegalStateException.class, iter::keyValue);
+
+                // free() is idempotent -- no exception
+                assertDoesNotThrow(iter::free);
+                assertDoesNotThrow(iter::close);
+            }
+        }
+    }
+
+    @Test
+    @Order(81)
+    void testTransactionNullArgs() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_txn_null").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("test_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            try (Transaction txn = db.beginTransaction()) {
+                // put: null cf, null key, null value
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.put(null, "k".getBytes(), "v".getBytes()));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.put(cf, null, "v".getBytes()));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.put(cf, "k".getBytes(), null));
+
+                // get: null cf, null key
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.get(null, "k".getBytes()));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.get(cf, null));
+
+                // delete: null cf, null key
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.delete(null, "k".getBytes()));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.delete(cf, null));
+
+                // singleDelete: null cf, null key (already tested but grouped here)
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.singleDelete(null, "k".getBytes()));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.singleDelete(cf, null));
+
+                // newIterator: null cf
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.newIterator(null));
+            }
+        }
+    }
+
+    @Test
+    @Order(82)
+    void testTransactionSavepointNullAndEmpty() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_txn_sp_null").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("test_cf", ColumnFamilyConfig.defaultConfig());
+
+            try (Transaction txn = db.beginTransaction()) {
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.savepoint(null));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.savepoint(""));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.rollbackToSavepoint(null));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.rollbackToSavepoint(""));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.releaseSavepoint(null));
+                assertThrows(IllegalArgumentException.class,
+                    () -> txn.releaseSavepoint(""));
+            }
+        }
+    }
+
+    @Test
+    @Order(83)
+    void testTransactionOperationsAfterFree() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_txn_after_free").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("test_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            Transaction txn = db.beginTransaction();
+            txn.put(cf, "k".getBytes(), "v".getBytes());
+            txn.commit();
+            txn.free();
+
+            // All operations throw IllegalStateException after free
+            assertThrows(IllegalStateException.class,
+                () -> txn.put(cf, "k".getBytes(), "v".getBytes()));
+            assertThrows(IllegalStateException.class,
+                () -> txn.get(cf, "k".getBytes()));
+            assertThrows(IllegalStateException.class,
+                () -> txn.delete(cf, "k".getBytes()));
+            assertThrows(IllegalStateException.class,
+                () -> txn.singleDelete(cf, "k".getBytes()));
+            assertThrows(IllegalStateException.class, txn::commit);
+            assertThrows(IllegalStateException.class, txn::rollback);
+            assertThrows(IllegalStateException.class,
+                () -> txn.savepoint("sp"));
+            assertThrows(IllegalStateException.class,
+                () -> txn.rollbackToSavepoint("sp"));
+            assertThrows(IllegalStateException.class,
+                () -> txn.releaseSavepoint("sp"));
+            assertThrows(IllegalStateException.class,
+                () -> txn.newIterator(cf));
+            assertThrows(IllegalStateException.class,
+                () -> txn.reset(IsolationLevel.READ_COMMITTED));
+
+            // free() and close() are idempotent
+            assertDoesNotThrow(txn::free);
+            assertDoesNotThrow(txn::close);
+        }
+    }
+
+    @Test
+    @Order(84)
+    void testOpenWithObjectStoreConfig() throws TidesDBException {
+        Path osDir = tempDir.resolve("os_cfg_dir");
+        osDir.toFile().mkdirs();
+
+        ObjectStoreConfig osc = ObjectStoreConfig.builder()
+            .localCachePath(osDir.resolve("cache").toString())
+            .localCacheMaxBytes(1024 * 1024)
+            .cacheOnRead(true)
+            .cacheOnWrite(false)
+            .maxConcurrentUploads(2)
+            .maxConcurrentDownloads(4)
+            .multipartThreshold(1024 * 1024)
+            .multipartPartSize(256 * 1024)
+            .syncManifestToObject(false)
+            .replicateWal(false)
+            .walUploadSync(true)
+            .walSyncThresholdBytes(2048)
+            .walSyncOnCommit(true)
+            .replicaMode(false)
+            .replicaSyncIntervalUs(1000)
+            .replicaReplayWal(true)
+            .build();
+
+        Config config = Config.builder(tempDir.resolve("testdb_osc_cfg").toString())
+            .objectStoreFsPath(osDir.toString())
+            .objectStoreConfig(osc)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            assertNotNull(db);
+            DbStats dbStats = db.getDbStats();
+            assertNotNull(dbStats);
+            assertTrue(dbStats.isObjectStoreEnabled());
+        }
+    }
+
+    @Test
+    @Order(85)
+    void testOpenNullConfig() {
+        assertThrows(IllegalArgumentException.class, () -> TidesDB.open(null));
+    }
+
+    @Test
+    @Order(86)
+    void testOpenEmptyDbPath() {
+        Config config = Config.builder("").build();
+        assertThrows(IllegalArgumentException.class, () -> TidesDB.open(config));
+    }
+
+    @Test
+    @Order(87)
+    void testColumnFamilyUpdateRuntimeConfigNull() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_cf_upd_null").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            db.createColumnFamily("test_cf", ColumnFamilyConfig.defaultConfig());
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            assertThrows(IllegalArgumentException.class,
+                () -> cf.updateRuntimeConfig(null, false));
+        }
+    }
 }

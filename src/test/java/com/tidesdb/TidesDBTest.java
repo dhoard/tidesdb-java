@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -2344,6 +2345,276 @@ public class TidesDBTest {
                 assertEquals(0, received.size(),
                     "Hook should not fire after clearing at iteration " + i);
             }
+        }
+    }
+
+    @Test
+    @Order(61)
+    void testCloseWithInstalledHookReleasesCallback() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_close_hook_leak").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        List<CommitOp[]> received = new ArrayList<>();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            cf.setCommitHook((ops, commitSeq) -> {
+                received.add(ops);
+                return 0;
+            });
+
+            // Commit some data so the hook is exercised
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf, "key1".getBytes(StandardCharsets.UTF_8),
+                    "value1".getBytes(StandardCharsets.UTF_8));
+                txn.commit();
+            }
+
+            assertEquals(1, received.size());
+
+            // close() via try-with-resources WITHOUT calling clearCommitHook()
+        }
+
+        // After close, trigger GC and verify no callbacks fire post-close
+        System.gc();
+
+        // The hook should not have fired again after close
+        assertEquals(1, received.size(),
+            "Hook callback should not fire after database close");
+    }
+
+    @Test
+    @Order(62)
+    void testCloseWithInstalledHookIdempotent() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_close_idempotent").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        TidesDB db = TidesDB.open(config);
+        ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+        db.createColumnFamily("test_cf", cfConfig);
+
+        ColumnFamily cf = db.getColumnFamily("test_cf");
+
+        cf.setCommitHook((ops, commitSeq) -> {
+            return 0;
+        });
+
+        // First close
+        db.close();
+
+        // Second close should not throw
+        assertDoesNotThrow(db::close);
+    }
+
+    @Test
+    @Order(63)
+    void testColumnFamilyOperationsThrowAfterOwnerClose() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_cf_after_close").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        ColumnFamily cf;
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+            cf = db.getColumnFamily("test_cf");
+        }
+        // db is now closed; cf still references it
+
+        assertThrows(IllegalStateException.class, cf::getStats);
+        assertThrows(IllegalStateException.class, cf::compact);
+        assertThrows(IllegalStateException.class,
+            () -> cf.compactRange("a".getBytes(), "z".getBytes()));
+        assertThrows(IllegalStateException.class, cf::flushMemtable);
+        assertThrows(IllegalStateException.class, cf::isFlushing);
+        assertThrows(IllegalStateException.class, cf::isCompacting);
+        assertThrows(IllegalStateException.class,
+            () -> cf.updateRuntimeConfig(ColumnFamilyConfig.defaultConfig(), false));
+        assertThrows(IllegalStateException.class,
+            () -> cf.rangeCost("a".getBytes(), "z".getBytes()));
+        assertThrows(IllegalStateException.class,
+            () -> cf.setCommitHook((ops, seq) -> 0));
+        assertThrows(IllegalStateException.class, cf::clearCommitHook);
+        assertThrows(IllegalStateException.class, cf::purge);
+        assertThrows(IllegalStateException.class, cf::syncWal);
+    }
+
+    @Test
+    @Order(64)
+    void testSetClearHookAfterCloseThrows() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_hook_after_close").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        ColumnFamily cf;
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+            cf = db.getColumnFamily("test_cf");
+        }
+        // db is now closed
+
+        assertThrows(IllegalStateException.class,
+            () -> cf.setCommitHook((ops, seq) -> 0));
+        assertThrows(IllegalStateException.class, cf::clearCommitHook);
+    }
+
+    @Test
+    @Order(65)
+    void testMultipleColumnFamiliesWithHooksCloseCleanly() throws TidesDBException {
+        Config config = Config.builder(tempDir.resolve("testdb_multi_cf_hooks").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        List<CommitOp[]> hook1Received = new ArrayList<>();
+        List<CommitOp[]> hook2Received = new ArrayList<>();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("cf1", cfConfig);
+            db.createColumnFamily("cf2", cfConfig);
+            db.createColumnFamily("cf3", cfConfig);
+
+            ColumnFamily cf1 = db.getColumnFamily("cf1");
+            ColumnFamily cf2 = db.getColumnFamily("cf2");
+            ColumnFamily cf3 = db.getColumnFamily("cf3");
+
+            // Install hooks on cf1 and cf2, leave cf3 without a hook
+            cf1.setCommitHook((ops, seq) -> {
+                hook1Received.add(ops);
+                return 0;
+            });
+            cf2.setCommitHook((ops, seq) -> {
+                hook2Received.add(ops);
+                return 0;
+            });
+
+            // Commit data to all three CFs
+            try (Transaction txn = db.beginTransaction()) {
+                txn.put(cf1, "k1".getBytes(), "v1".getBytes());
+                txn.put(cf2, "k2".getBytes(), "v2".getBytes());
+                txn.put(cf3, "k3".getBytes(), "v3".getBytes());
+                txn.commit();
+            }
+
+            assertEquals(1, hook1Received.size());
+            assertEquals(1, hook2Received.size());
+
+            // close() via try-with-resources WITHOUT clearing hooks
+        }
+
+        // After close, no deferred callbacks should fire
+        System.gc();
+        assertEquals(1, hook1Received.size(),
+            "Hook1 should not fire after close");
+        assertEquals(1, hook2Received.size(),
+            "Hook2 should not fire after close");
+    }
+
+    @Test
+    @Order(66)
+    void testSetClearHookNotRacingClose() throws TidesDBException, InterruptedException {
+        Config config = Config.builder(tempDir.resolve("testdb_hook_race_close").toString())
+            .numFlushThreads(2)
+            .numCompactionThreads(2)
+            .logLevel(LogLevel.INFO)
+            .blockCacheSize(64 * 1024 * 1024)
+            .maxOpenSSTables(256)
+            .build();
+
+        try (TidesDB db = TidesDB.open(config)) {
+            ColumnFamilyConfig cfConfig = ColumnFamilyConfig.defaultConfig();
+            db.createColumnFamily("test_cf", cfConfig);
+
+            ColumnFamily cf = db.getColumnFamily("test_cf");
+
+            // Set initial hook
+            cf.setCommitHook((ops, seq) -> {
+                return 0;
+            });
+
+            CountDownLatch startLatch = new CountDownLatch(1);
+            CountDownLatch stopLatch = new CountDownLatch(1);
+
+            // Writer thread that commits in a loop
+            Thread writer = new Thread(() -> {
+                try {
+                    startLatch.await();
+                } catch (InterruptedException e) {
+                    return;
+                }
+                while (stopLatch.getCount() > 0) {
+                    try (Transaction txn = db.beginTransaction()) {
+                        byte[] key = ("key_" + System.nanoTime()).getBytes(StandardCharsets.UTF_8);
+                        txn.put(cf, key, "value".getBytes(StandardCharsets.UTF_8));
+                        txn.commit();
+                    } catch (TidesDBException | IllegalStateException e) {
+                        // Expected during close
+                    }
+                }
+            });
+            writer.setDaemon(true);
+
+            // Replacer thread that alternates set/clear hook
+            Thread replacer = new Thread(() -> {
+                try {
+                    startLatch.await();
+                } catch (InterruptedException e) {
+                    return;
+                }
+                for (int i = 0; i < 200 && stopLatch.getCount() > 0; i++) {
+                    try {
+                        if (i % 2 == 0) {
+                            cf.setCommitHook((ops, seq) -> 0);
+                        } else {
+                            cf.clearCommitHook();
+                        }
+                    } catch (TidesDBException | IllegalStateException e) {
+                        // Expected during close
+                    }
+                }
+            });
+            replacer.setDaemon(true);
+
+            writer.start();
+            replacer.start();
+            startLatch.countDown();
+
+            // Let them run for ~500ms then close
+            Thread.sleep(500);
+
+            // Close should not hang, crash, or throw
+            assertDoesNotThrow(db::close);
+
+            stopLatch.countDown();
+            writer.join(5000);
+            replacer.join(5000);
         }
     }
 }
